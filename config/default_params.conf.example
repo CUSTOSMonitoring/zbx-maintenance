@@ -1,0 +1,5 @@
+# Configuración por defecto para run_maintenance.sh
+ZBX_URL=https://172.22.10.22/api_jsonrpc.php
+ZBX_APITOKEN=<INSERT_ZABBIX_API_TOKEN>
+TIMEPERIOD_PERIOD=1d
+SECTOR=fallback
