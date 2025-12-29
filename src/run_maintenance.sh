@@ -17,15 +17,18 @@ GROUPNAMES=""
 HOSTNAMES=""
 SECTOR=""
 
-# Archivo de configuración por defecto
-CONFIG_FILE="default_params.conf"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/config/default_params.conf"
+MAINTENANCE_HANDLER_JS="${SCRIPT_DIR}/src/maintenance_handler.js"
+
 
 # Cargamos configuración si existe
-if [[ -f "$CONFIG_FILE" ]]; then
-    source "$CONFIG_FILE"
-else
-    echo "Advertencia: Archivo de configuración '$CONFIG_FILE' no encontrado. Usando valores vacíos." >&2
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "Error: Archivo de configuración no encontrado: $CONFIG_FILE"
+    echo "Por favor, crea uno basado en default_params.conf.example"
+    exit 1
 fi
+
 
 parse_time_to_seconds() {
     local input="$1"
@@ -377,13 +380,13 @@ KEY_SECTOR="mantenimientos.${SECTOR}"
 
 item_id=$(get_itemid "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$HOST_LOG" "$KEY_SECTOR")
 
-# Construimos el json de entrada del maintenance_handler.js
+# Construimos el json de entrada del "$MAINTENANCE_HANDLER_JS"
 INPUT_JSON="$(build_input_json)"
 
 echo "🚀 Ejecutando: update_maintenance..."
 
 # Ejecutamos zabbix_js con el JSON como parámetro
-rsp_msg=$(zabbix_js -s maintenance_handler.js -p "$INPUT_JSON")
+rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$INPUT_JSON")
 exit_code=$?
 if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
     send_result "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$item_id" "update_maintenance" "error" "zabbix_js falló o devolvió error: $rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
@@ -396,7 +399,7 @@ fi
 RUN_MODE="display_maintenance"
 INPUT_JSON="$(build_input_json)"
 
-rsp_msg=$(zabbix_js -s maintenance_handler.js -p "$INPUT_JSON")
+rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$INPUT_JSON")
 exit_code=$?
 
 if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema\|null"; then
