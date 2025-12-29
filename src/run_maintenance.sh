@@ -7,6 +7,14 @@
 # Utiliza la API de Zabbix para registrar en Zabbix los mantenimientos por sector
 # ==================================================================================
 
+set -e
+set -u
+
+# Validar dependencias
+command -v zabbix_js >/dev/null 2>&1 || { echo "Error: zabbix_js no encontrado." >&2; exit 1; }
+command -v zabbix_sender >/dev/null 2>&1 || { echo "Error: zabbix_sender no encontrado." >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "Error: jq no encontrado." >&2; exit 1; }
+
 # Valores por defecto
 ZBX_URL=""
 ZBX_APITOKEN=""
