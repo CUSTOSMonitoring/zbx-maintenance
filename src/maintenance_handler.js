@@ -1,3 +1,10 @@
+/*
+ * maintenance_handler.js
+ * Script para interactuar con la API de Zabbix y gestionar mantenimientos.
+*/
+
+
+
 // Extrae los valores de una propiedad específica de un array de objetos y retorna un array con los valores extraídos
 function extractIds(jsonData, prop_id) {
     // Validación: si jsonData es null, undefined, o no es un array, retornar null
@@ -67,7 +74,7 @@ function get_host_id(url, token, hostnames) {
         return hostids_arr;
 
     } catch (error) {
-        return "Problema al encontrar el/los host/s: " + error;
+        return { "error": "Problema al encontrar el/los host/s: " + error };
     }
 }
 
@@ -101,7 +108,7 @@ function get_group_id(url, token, groupnames) {
         return groupids_arr;
 
     } catch (error) {
-        return "Problema al encontrar el/los hostgroup/s: " + error;
+        return { "error": "Problema al encontrar el/los hostgroup/s: " + error };
     }
 }
 
@@ -135,7 +142,7 @@ function get_maintenance_id(url, token, maintenance_name) {
         return maintenanceids_arr;
 
     } catch (error) {
-        return "Problema al encontrar el/los mantenimiento/s: " + error;
+        return { "error": "Problema al encontrar el/los mantenimiento/s: " + error };
     }
 }
 
@@ -173,7 +180,7 @@ function display_maintenance(url, token, maintenance_id) {
         return maintenance_info;
 
     } catch (error) {
-        return "Problema al encontrar el/los mantenimiento/s: " + error;
+        return { "error": "Problema al encontrar el/los mantenimiento/s: " + error };
     }
 }
 
@@ -251,7 +258,7 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
         return maintenanceids_arr;
 
     } catch (error) {
-        return "Problema al actualizar el mantenimiento: " + error;
+        return { "error": "Problema al actualizar el mantenimiento: " + error };
     }
 }
 
@@ -289,4 +296,3 @@ res = MaintenanceRes;
 
 
 return JSON.stringify(res);
-//return res;
