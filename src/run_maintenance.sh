@@ -29,6 +29,8 @@ RAW_SECTOR=""
 # Variables finales que usarán el script
 ZBX_URL=""
 ZBX_APITOKEN=""
+ZBX_USER=""
+ZBX_PASSWORD=""
 MAINTENANCE_NAME=""
 TIMEPERIOD_PERIOD=""
 TIMEPERIOD_STARTDATE=""
@@ -139,6 +141,114 @@ parse_datetime_to_timestamp() {
 }
 
 # --- Funciones de interacción con Zabbix API ---
+
+# Función para iniciar sesión en Zabbix y obtener un session token
+# Argumentos:
+#   $1: URL del frontend/API de Zabbix (ej: https://zabbix.example.com/api_jsonrpc.php)
+#   $2: Nombre de usuario
+#   $3: Contraseña
+# Retorna:
+#   El session token en caso de éxito, o un JSON con error en caso de fallo
+zbx_login() {
+    local url="$1"
+    local username="$2"
+    local password="$3"
+
+    # Validación de params de entrada
+    if [[ -z "$url" || -z "$username" || -z "$password" ]]; then
+        echo "Error: Faltan parámetros en zbx_login" >&2
+        return 1
+    fi
+
+    # Construimos el body de la solicitud de login
+    local json_body
+    json_body=$(jq -n --arg user "$username" --arg pass "$password" '
+        {
+            jsonrpc: "2.0",
+            method: "user.login",
+            params: {
+                username: $user,
+                password: $pass
+            },
+            id: 1
+        }')
+
+    # Hacemos la solicitud POST
+    local response
+    response=$(curl -k -w "\n" -s -X POST \
+         -H "Content-Type: application/json-rpc" \
+         -d "$json_body" \
+         "$url")
+
+    local curl_exit=$?
+    if [[ $curl_exit -ne 0 ]]; then
+        echo "Error: Fallo en la conexión HTTP al intentar iniciar sesión." >&2
+        return 1
+    fi
+
+    # Verificar si Zabbix devolvió un error
+    if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
+        echo "Error de Zabbix en login: $(echo "$response" | jq -r '.error.data // .error.message // "desconocido"')" >&2
+        return 1
+    fi
+
+    # Extraer y devolver el session token
+    echo "$response" | jq -r '.result // empty'
+    return 0
+}
+
+# Función para cerrar sesión en Zabbix
+# Argumentos:
+#   $1: URL del frontend/API de Zabbix (ej: https://zabbix.example.com/api_jsonrpc.php)
+#   $2: Session token obtenido previamente
+# Retorna:
+#   Resultado de la operación logout (normalmente vacío o un ID)
+zbx_logout() {
+    local url="$1"
+    local session_token="$2"
+
+    # Validación de params de entrada
+    if [[ -z "$url" || -z "$session_token" ]]; then
+        echo "Error: Faltan parámetros en zbx_logout" >&2
+        return 1
+    fi
+
+    # Construimos el body de la solicitud de logout
+    local json_body
+    json_body=$(jq -n --arg sess "$session_token" '
+        {
+            jsonrpc: "2.0",
+            method: "user.logout",
+            params: {},
+            auth: $sess,
+            id: 1
+        }')
+
+    # Hacemos la solicitud POST
+    local response
+    response=$(curl -k -w "\n" -s -X POST \
+         -H "Content-Type: application/json-rpc" \
+         -d "$json_body" \
+         "$url")
+
+    local curl_exit=$?
+    if [[ $curl_exit -ne 0 ]]; then
+        echo "Error: Fallo en la conexión HTTP al intentar cerrar sesión." >&2
+        return 1
+    fi
+
+    # Verificar si Zabbix devolvió un error
+    # El logout puede devolver un error si el token ya expiró o es inválido, pero eso puede ser aceptable.
+    if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
+        echo "Advertencia: Error de Zabbix en logout: $(echo "$response" | jq -r '.error.data // .error.message // "desconocido"')" >&2
+        # Devolvemos el error pero no detenemos el script principal
+        return 0 # Permitimos continuar
+    fi
+
+    # Imprimimos el result, puede ser vacío o un ID
+    echo "$response" | jq -r '.result // empty'
+    return 0
+}
 
 get_itemid() {
     local url_fe="$1"
@@ -359,6 +469,22 @@ while [[ $# -gt 0 ]]; do
             RAW_ZBX_URL="$2"
             shift 2
             ;;
+	-U|--zbx-user)
+            if [[ -z "$2" ]]; then
+                echo "Error: --zbx-user requiere un valor." >&2
+                exit 1
+            fi
+            ZBX_USER="$2"
+            shift 2
+            ;;
+        -P|--zbx-password)
+            if [[ -z "$2" ]]; then
+                echo "Error: --zbx-password requiere un valor." >&2
+                exit 1
+            fi
+            ZBX_PASSWORD="$2"
+            shift 2
+            ;;
         -t|--zbx-apitoken)
             if [[ -z "$2" ]]; then
                 echo "Error: --zbx-apitoken requiere un valor." >&2
@@ -477,6 +603,21 @@ if [[ -n "$RAW_SECTOR" ]]; then
     SECTOR="$RAW_SECTOR"
 fi
 
+# --- Inicio de lógica de autenticación (Acá va el punto 2) ---
+SESSION_TOKEN=""
+if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
+    echo "Iniciando sesión en Zabbix como '$ZBX_USER'..." >&2
+    SESSION_TOKEN=$(zbx_login "$ZBX_URL" "$ZBX_USER" "$ZBX_PASSWORD")
+    if [[ $? -ne 0 || -z "$SESSION_TOKEN" ]]; then
+        echo "Error fatal: No se pudo iniciar sesión." >&2
+        exit 1
+    fi
+    # Usamos el token de sesión como si fuera un API token
+    ZBX_APITOKEN="$SESSION_TOKEN"
+    # Limpiar las credenciales sensibles de la memoria (opcional pero recomendado)
+    unset ZBX_PASSWORD
+fi
+
 # Definir rutas basadas en la raíz del proyecto
 MAINTENANCE_HANDLER_JS="${PROJECT_ROOT}/src/maintenance_handler.js"
 
@@ -563,6 +704,12 @@ fi
 
 # Capturar el código de salida
 EXIT_CODE=$?
+
+# Si se inició sesión, intentar cerrarla
+if [[ -n "$SESSION_TOKEN" ]]; then
+    echo "Cerrando sesión en Zabbix..." >&2
+    zbx_logout "$ZBX_URL" "$SESSION_TOKEN" >/dev/null 2>&1 || true # Ignorar error de logout
+fi
 
 # Manejo básico del error (aunque ya debería haber salido si hubo error crítico)
 if [ $EXIT_CODE -ne 0 ]; then
