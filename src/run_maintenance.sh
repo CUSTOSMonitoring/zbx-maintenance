@@ -603,6 +603,15 @@ if [[ -n "$RAW_SECTOR" ]]; then
     SECTOR="$RAW_SECTOR"
 fi
 
+# Definir rutas basadas en la raíz del proyecto
+MAINTENANCE_HANDLER_JS="${PROJECT_ROOT}/src/maintenance_handler.js"
+
+# Validar existencia de archivos críticos
+if [ ! -f "$MAINTENANCE_HANDLER_JS" ]; then
+    echo "Error: Archivo de handler no encontrado: $MAINTENANCE_HANDLER_JS" >&2
+    exit 1
+fi
+
 # --- Inicio de lógica de autenticación (Acá va el punto 2) ---
 SESSION_TOKEN=""
 if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
@@ -616,15 +625,6 @@ if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
     ZBX_APITOKEN="$SESSION_TOKEN"
     # Limpiar las credenciales sensibles de la memoria (opcional pero recomendado)
     unset ZBX_PASSWORD
-fi
-
-# Definir rutas basadas en la raíz del proyecto
-MAINTENANCE_HANDLER_JS="${PROJECT_ROOT}/src/maintenance_handler.js"
-
-# Validar existencia de archivos críticos
-if [ ! -f "$MAINTENANCE_HANDLER_JS" ]; then
-    echo "Error: Archivo de handler no encontrado: $MAINTENANCE_HANDLER_JS" >&2
-    exit 1
 fi
 
 # Validación de campos obligatorios (después de cargar la configuración y aplicar flags)
