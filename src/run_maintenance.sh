@@ -2,41 +2,54 @@
 # ==================================================================================
 # run_maintenance.sh
 # Script para ejecutar maintenance_handler.js vía zabbix_js
-# Recibe parámetros por banderas y construye el JSON de entrada.
-# Utiliza la API de Zabbix para registrar en Zabbix los mantenimientos por sector
+# Refactorizado para soportar subcomandos: create, update, delete, list.
+# Recibe parámetros por banderas según el subcomando elegido.
+# Utiliza la API de Zabbix para gestionar mantenimientos y registrar resultados.
 # ==================================================================================
 
 # =============================================================================
 # 1. === CONSTANTES Y VARIABLES GLOBALES (opcional, al inicio si son pocas) ===
 # =============================================================================
 
-# Variables para la configuración dinámica
-CONFIG_FILE="" # Se definirá durante el parseo de argumentos o por defecto
+# Variables generales (autenticación, config)
+ZBX_URL=""
+ZBX_USER="" # Para login
+ZBX_PASSWORD="" # Para login
+ZBX_APITOKEN="" # Para API (puede ser API Token o Session Token)
+CONFIG_FILE="" # Ruta al archivo de configuración
 PROJECT_ROOT=""
 MAINTENANCE_HANDLER_JS=""
 
-# Variables temporales para almacenar valores de banderas antes de parsear
-# y antes de aplicar los valores por defecto del archivo de configuración
+# Variables temporales para parseo de argumentos globales (antes de subcomandos)
 RAW_ZBX_URL=""
+RAW_ZBX_USER=""
+RAW_ZBX_PASSWORD=""
 RAW_ZBX_APITOKEN=""
-RAW_MAINTENANCE_NAME=""
-RAW_TIMEPERIOD_PERIOD=""
-RAW_TIMEPERIOD_STARTDATE=""
-RAW_GROUPNAMES=""
-RAW_HOSTNAMES=""
-RAW_SECTOR=""
 
-# Variables finales que usarán el script
-ZBX_URL=""
-ZBX_APITOKEN=""
-ZBX_USER=""
-ZBX_PASSWORD=""
-MAINTENANCE_NAME=""
-TIMEPERIOD_PERIOD=""
-TIMEPERIOD_STARTDATE=""
-GROUPNAMES=""
-HOSTNAMES=""
-SECTOR=""
+# Variables específicas por subcomando (declaradas vacías aquí)
+# CREATE
+CREATE_NAME=""
+CREATE_ACTIVE_SINCE=""
+CREATE_ACTIVE_TILL=""
+CREATE_TYPE=""
+CREATE_PERIOD=""
+CREATE_STARTDATE=""
+CREATE_HOSTNAMES=""
+CREATE_GROUPNAMES=""
+# UPDATE
+UPDATE_NAME=""
+UPDATE_PERIOD=""
+UPDATE_STARTDATE=""
+UPDATE_HOSTNAMES=""
+UPDATE_GROUPNAMES=""
+UPDATE_SECTOR="" # Necesario para el registro en Zabbix
+# DELETE
+DELETE_NAME=""
+# LIST
+LIST_FILTER=""
+
+# Variable para almacenar el subcomando elegido
+COMMAND=""
 
 # =============================================================================
 # 2. === FUNCIONES ===
@@ -140,15 +153,9 @@ parse_datetime_to_timestamp() {
     fi
 }
 
-# --- Funciones de interacción con Zabbix API ---
+# --- Funciones de autenticación Zabbix (sesión) ---
 
 # Función para iniciar sesión en Zabbix y obtener un session token
-# Argumentos:
-#   $1: URL del frontend/API de Zabbix (ej: https://zabbix.example.com/api_jsonrpc.php)
-#   $2: Nombre de usuario
-#   $3: Contraseña
-# Retorna:
-#   El session token en caso de éxito, o un JSON con error en caso de fallo
 zbx_login() {
     local url="$1"
     local username="$2"
@@ -198,11 +205,6 @@ zbx_login() {
 }
 
 # Función para cerrar sesión en Zabbix
-# Argumentos:
-#   $1: URL del frontend/API de Zabbix (ej: https://zabbix.example.com/api_jsonrpc.php)
-#   $2: Session token obtenido previamente
-# Retorna:
-#   Resultado de la operación logout (normalmente vacío o un ID)
 zbx_logout() {
     local url="$1"
     local session_token="$2"
@@ -238,7 +240,6 @@ zbx_logout() {
     fi
 
     # Verificar si Zabbix devolvió un error
-    # El logout puede devolver un error si el token ya expiró o es inválido, pero eso puede ser aceptable.
     if echo "$response" | jq -e '.error' >/dev/null 2>&1; then
         echo "Advertencia: Error de Zabbix en logout: $(echo "$response" | jq -r '.error.data // .error.message // "desconocido"')" >&2
         # Devolvemos el error pero no detenemos el script principal
@@ -249,6 +250,8 @@ zbx_logout() {
     echo "$response" | jq -r '.result // empty'
     return 0
 }
+
+# --- Funciones de interacción con Zabbix API (history_push, get_itemid) ---
 
 get_itemid() {
     local url_fe="$1"
@@ -338,7 +341,7 @@ send_result() {
     local url_fe="$1"      # La URL del Zabbix Frontend
     local token="$2"       # API Token de Zabbix
     local item_id="$3"     # ID del item en el cual vamos a loguear los resultados de la operacion
-    local mode="$4"        # update_maintenance, display_maintenance
+    local mode="$4"        # update_maintenance, display_maintenance, create_maintenance, etc.
     local status="$5"      # success, error
     local message="$6"     # puede ser JSON o texto
     local host_host="$7"   # Nombre del host donde se van a cargar los resultados de la operacion
@@ -372,64 +375,400 @@ send_result() {
 # --- Funciones auxiliares de script ---
 
 # Función para construir el JSON de entrada para el handler JavaScript
-build_input_json() {
-    cat << EOF
-{
-  "zbx_url": "$ZBX_URL_ESC",
-  "zbx_apitoken": "$ZBX_APITOKEN_ESC",
-  "maintenance_name": "$MAINTENANCE_NAME_ESC",
-  "timeperiod_period": "$TIMEPERIOD_PERIOD",
-  "timeperiod_startdate": "$TIMEPERIOD_STARTDATE",
-  "groupnames": "$GROUPNAMES_ESC",
-  "hostnames": "$HOSTNAMES_ESC",
-  "sector": "$SECTOR",
-  "run_mode": "$RUN_MODE"
+# Acepta el 'action' y los parámetros específicos
+build_input_json_for_action() {
+    local action="$1"
+    # Se esperan más parámetros según la acción
+    # Este es un ejemplo genérico, se puede especializar por acción
+    # Usamos variables globales definidas en cada cmd_*
+    case "$action" in
+        create)
+            # Usar las variables CREATE_*
+            jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" \
+               --arg name "$CREATE_NAME" --argjson since "$CREATE_ACTIVE_SINCE_PARSED" --argjson till "$CREATE_ACTIVE_TILL_PARSED" \
+               --argjson type "$CREATE_TYPE" --argjson start_date "$CREATE_STARTDATE_PARSED" --argjson period "$CREATE_PERIOD_SECONDS" \
+               --arg hostnames "$CREATE_HOSTNAMES" --arg groupnames "$CREATE_GROUPNAMES" \
+               '{
+                   zbx_url: $url,
+                   zbx_apitoken: $token,
+                   action: $act,
+                   maintenance_name: $name,
+                   maintenance_active_since: $since,
+                   maintenance_active_till: $till,
+                   maintenance_type: $type,
+                   timeperiod_startdate: $start_date,
+                   timeperiod_period: $period,
+                   hostnames: $hostnames,
+                   groupnames: $groupnames
+               }'
+            ;;
+        update)
+            # Usar las variables UPDATE_*
+            jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" \
+               --arg name "$UPDATE_NAME" --argjson start_date "$UPDATE_STARTDATE_PARSED" --argjson period "$UPDATE_PERIOD_SECONDS" \
+               --arg hostnames "$UPDATE_HOSTNAMES" --arg groupnames "$UPDATE_GROUPNAMES" --arg sector "$UPDATE_SECTOR" \
+               '{
+                   zbx_url: $url,
+                   zbx_apitoken: $token,
+                   action: $act,
+                   maintenance_name: $name,
+                   timeperiod_startdate: $start_date,
+                   timeperiod_period: $period,
+                   hostnames: $hostnames,
+                   groupnames: $groupnames,
+                   sector: $sector
+               }'
+            ;;
+        # Otros casos como delete, list...
+        *)
+            echo '{}' # JSON vacío por defecto si la acción no está implementada
+            ;;
+    esac
 }
+
+
+# --- Funciones de ayuda ---
+
+# Función: mostrar ayuda general
+show_help_general() {
+    cat << 'EOF'
+Uso: run_maintenance.sh <comando> [OPCIONES]
+
+Herramienta para gestionar mantenimientos en Zabbix.
+
+Comandos:
+    create      Crea un nuevo mantenimiento.
+    update      Actualiza un mantenimiento existente.
+    delete      Elimina un mantenimiento existente.
+    list        Lista mantenimientos existentes.
+
+Use 'run_maintenance.sh <comando> --help' para ver opciones específicas de cada comando.
 EOF
 }
 
-# Función: mostrar ayuda
-show_help() {
+# Ayuda específica para cada subcomando
+show_help_create() {
     cat << 'EOF'
-Uso: run_maintenance.sh [OPCIONES]
+Uso: run_maintenance.sh create [OPCIONES]
 
-Script para gestionar los mantenimientos de los hosts en Zabbix.
-A través de este script se puede agregar host o quitar hosts de mantenimiento por sector, asi como también modificar los parametros del mantenimiento como fechas de mantenimiento o longitud del mismo.
+Crea un nuevo mantenimiento en Zabbix.
 
 Opciones:
-    -u, --zbx-url URL               URL del API de Zabbix (ej: https://zabbix/api_jsonrpc.php)
-    -t, --zbx-apitoken TOKEN        Token de API de Zabbix
-    -m, --maintenance-name NAME     Nombre del mantenimiento a actualizar
-    -p, --timeperiod-period SEC     Duración del periodo de mantenimiento en segundos
-    -s, --timeperiod-startdate DATE Fecha de inicio (timestamp). Si se omite, se usa NOW.
-    -g, --groupnames LIST           Lista de grupos separados por comas (ej: "Linux servers,VMs")
-    -H, --hostnames LIST            Lista de hosts separados por comas (ej: "srv01,srv02")
-    -S, --sector NAME               Sector responsable del mantenimiento. Requerido para dejar registro de los mantenimientos
-    -c, --config PATH               Ruta al archivo de configuración (por defecto: config/default_params.conf)
-    -h, --help                      Muestra esta ayuda y sale
+    -n, --name NAME                 Nombre del nuevo mantenimiento (requerido).
+    --active-since TIMESTAMP        Timestamp Unix de inicio del mantenimiento (requerido).
+    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento (requerido).
+    --type TYPE                     Tipo de mantenimiento (0: Normal, 1: No Data). Por defecto 0.
+    --period PERIOD                 Duración del período de mantenimiento (ej: 2h, 1d). Requerido.
+    --startdate STARTDATE           Fecha/hora de inicio del primer período (timestamp o formato yyyy-mm-dd hh:mm:ss). Por defecto, ahora.
+    -H, --hostnames LIST            Lista de hosts separados por comas.
+    -G, --groupnames LIST           Lista de grupos separados por comas.
 
 Ejemplo:
-    ./run_maintenance.sh \
-        --zbx-url https://172.221.101.221/api_jsonrpc.php \
-        --zbx-apitoken 9206104e1ab5b7c49aae94b008e17b310d99317f2d05f714baf8ac45bb672315 \
-        --maintenance-name "Infra Maintenance" \
-        --timeperiod-period 7200 \
-        --hostnames "Serv1, test-srv, Switch123" \
-        --groupnames "Critical servers" \
-        --sector "Infra"
-
-Notas:
-    - Si --timeperiod-startdate no se especifica, se usará el timestamp actual.
-    - Los valores que contengan espacios deben ir entre comillas.
+    ./run_maintenance.sh create \
+        --name "Mantenimiento de Prueba" \
+        --active-since 1704067200 \
+        --active-till 1704153600 \
+        --period 2h \
+        --hostnames "Serv1, Serv2"
 EOF
+}
+
+show_help_update() {
+    cat << 'EOF'
+Uso: run_maintenance.sh update [OPCIONES]
+
+Actualiza un mantenimiento existente en Zabbix.
+
+Opciones:
+    -n, --name NAME                 Nombre del mantenimiento a actualizar (requerido).
+    --period PERIOD                 Nueva duración del período de mantenimiento (ej: 2h, 1d).
+    --startdate STARTDATE           Nueva fecha/hora de inicio del período (timestamp o formato yyyy-mm-dd hh:mm:ss).
+    -H, --hostnames LIST            Nueva lista de hosts separados por comas.
+    -G, --groupnames LIST           Nueva lista de grupos separados por comas.
+    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
+
+Ejemplo:
+    ./run_maintenance.sh update \
+        --name "Mantenimiento de Prueba" \
+        --period 4h \
+        --hostnames "Serv1, Serv3"
+EOF
+}
+
+show_help_delete() {
+    cat << 'EOF'
+Uso: run_maintenance.sh delete [OPCIONES]
+
+Elimina un mantenimiento existente en Zabbix.
+
+Opciones:
+    -n, --name NAME                 Nombre del mantenimiento a eliminar (requerido).
+
+Ejemplo:
+    ./run_maintenance.sh delete --name "Mantenimiento de Prueba"
+EOF
+}
+
+show_help_list() {
+    cat << 'EOF'
+Uso: run_maintenance.sh list [OPCIONES]
+
+Lista mantenimientos en Zabbix.
+
+Opciones:
+    -f, --filter FILTER             Filtro opcional para la búsqueda (nombre, etc.).
+
+Ejemplo:
+    ./run_maintenance.sh list --filter "Prod"
+EOF
+}
+
+# --- Subcomandos ---
+
+cmd_create() {
+    # Parseo específico para create (usando $@)
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name)
+                if [[ -z "$2" ]]; then echo "Error: --name requiere un valor." >&2; exit 1; fi
+                CREATE_NAME="$2"; shift 2 ;;
+            --active-since)
+                if [[ -z "$2" ]]; then echo "Error: --active-since requiere un valor." >&2; exit 1; fi
+                CREATE_ACTIVE_SINCE="$2"; shift 2 ;;
+            --active-till)
+                if [[ -z "$2" ]]; then echo "Error: --active-till requiere un valor." >&2; exit 1; fi
+                CREATE_ACTIVE_TILL="$2"; shift 2 ;;
+            --type)
+                if [[ -z "$2" ]]; then echo "Error: --type requiere un valor." >&2; exit 1; fi
+                CREATE_TYPE="$2"; shift 2 ;;
+            --period)
+                if [[ -z "$2" ]]; then echo "Error: --period requiere un valor." >&2; exit 1; fi
+                CREATE_PERIOD="$2"; shift 2 ;;
+            --startdate)
+                if [[ -z "$2" ]]; then echo "Error: --startdate requiere un valor." >&2; exit 1; fi
+                CREATE_STARTDATE="$2"; shift 2 ;;
+            -H|--hostnames)
+                if [[ -z "$2" ]]; then echo "Error: --hostnames requiere un valor." >&2; exit 1; fi
+                CREATE_HOSTNAMES="$2"; shift 2 ;;
+            -G|--groupnames)
+                if [[ -z "$2" ]]; then echo "Error: --groupnames requiere un valor." >&2; exit 1; fi
+                CREATE_GROUPNAMES="$2"; shift 2 ;;
+            --help|-h)
+                show_help_create; exit 0 ;;
+            *)
+                echo "Error: opción desconocida para create: $1" >&2; show_help_create; exit 1 ;;
+        esac
+    done
+
+    # Validación de parámetros requeridos para create
+    if [[ -z "$CREATE_NAME" || -z "$CREATE_ACTIVE_SINCE" || -z "$CREATE_ACTIVE_TILL" || -z "$CREATE_PERIOD" ]]; then
+        echo "Error: Parámetros requeridos faltantes para create." >&2
+        show_help_create
+        exit 1
+    fi
+
+    # Parseo de valores (timestamps, periodos)
+    CREATE_ACTIVE_SINCE_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_SINCE") || exit 1
+    CREATE_ACTIVE_TILL_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_TILL") || exit 1
+    CREATE_PERIOD_SECONDS=$(parse_time_to_seconds "$CREATE_PERIOD") || exit 1
+    if [[ -n "$CREATE_STARTDATE" ]]; then
+        CREATE_STARTDATE_PARSED=$(parse_datetime_to_timestamp "$CREATE_STARTDATE") || exit 1
+    else
+        CREATE_STARTDATE_PARSED=$(date +%s)
+    fi
+    if [[ -z "$CREATE_TYPE" ]]; then CREATE_TYPE=0; fi # Valor por defecto
+
+    # Construimos el JSON de entrada para el handler, incluyendo la acción
+    local action_json
+    action_json=$(build_input_json_for_action "create")
+
+    # Llamamos al handler JavaScript con el nuevo JSON
+    local rsp_msg
+    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
+        echo "Error: Falló la creación del mantenimiento." >&2
+        echo "$rsp_msg" >&2
+        exit 1
+    else
+        echo "Mantenimiento creado exitosamente:"
+        echo "$rsp_msg"
+        # Opcional: enviar resultado a Zabbix (requiere item_id y sector)
+        # local HOST_LOG="Registros de Mantenimientos"
+        # local KEY_SECTOR="mantenimientos.${SECTOR_DEFAULT_IF_ANY}" # Deberías pasar el sector o tener uno por defecto si aplica
+        # local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+        # send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "create_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+    fi
+}
+
+cmd_update() {
+    # Parseo específico para update
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name)
+                if [[ -z "$2" ]]; then echo "Error: --name requiere un valor." >&2; exit 1; fi
+                UPDATE_NAME="$2"; shift 2 ;;
+            --period)
+                if [[ -z "$2" ]]; then echo "Error: --period requiere un valor." >&2; exit 1; fi
+                UPDATE_PERIOD="$2"; shift 2 ;;
+            --startdate)
+                if [[ -z "$2" ]]; then echo "Error: --startdate requiere un valor." >&2; exit 1; fi
+                UPDATE_STARTDATE="$2"; shift 2 ;;
+            -H|--hostnames)
+                if [[ -z "$2" ]]; then echo "Error: --hostnames requiere un valor." >&2; exit 1; fi
+                UPDATE_HOSTNAMES="$2"; shift 2 ;;
+            -G|--groupnames)
+                if [[ -z "$2" ]]; then echo "Error: --groupnames requiere un valor." >&2; exit 1; fi
+                UPDATE_GROUPNAMES="$2"; shift 2 ;;
+            -S|--sector) # Este parámetro es para el registro en Zabbix
+                if [[ -z "$2" ]]; then echo "Error: --sector requiere un valor." >&2; exit 1; fi
+                UPDATE_SECTOR="$2"; shift 2 ;;
+            --help|-h)
+                show_help_update; exit 0 ;;
+            *)
+                echo "Error: opción desconocida para update: $1" >&2; show_help_update; exit 1 ;;
+        esac
+    done
+
+    # Validación de parámetros requeridos para update
+    if [[ -z "$UPDATE_NAME" ]]; then
+        echo "Error: Parámetro requerido faltante para update: --name." >&2
+        show_help_update
+        exit 1
+    fi
+
+    # Parseo de valores (si se proporcionaron)
+    local update_period_sec=""
+    local update_startdate_ts=""
+    if [[ -n "$UPDATE_PERIOD" ]]; then
+        update_period_sec=$(parse_time_to_seconds "$UPDATE_PERIOD") || exit 1
+    fi
+    if [[ -n "$UPDATE_STARTDATE" ]]; then
+        update_startdate_ts=$(parse_datetime_to_timestamp "$UPDATE_STARTDATE") || exit 1
+    else
+        update_startdate_ts=$(date +%s)
+    fi
+    # Asignamos a variables globales para el JSON
+    UPDATE_PERIOD_SECONDS="$update_period_sec"
+    UPDATE_STARTDATE_PARSED="$update_startdate_ts"
+
+    # Construimos el JSON de entrada para el handler, incluyendo la acción
+    local action_json
+    action_json=$(build_input_json_for_action "update")
+
+    # Llamamos al handler JavaScript con el nuevo JSON
+    local rsp_msg
+    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
+        echo "Error: Falló la actualización del mantenimiento." >&2
+        echo "$rsp_msg" >&2
+        exit 1
+    else
+        echo "Mantenimiento actualizado exitosamente:"
+        echo "$rsp_msg"
+        # Opcional: enviar resultado a Zabbix (esto podría repetirse con display)
+        # Similar al create, necesitas el item_id y el sector.
+        if [[ -n "$UPDATE_SECTOR" ]]; then
+            local HOST_LOG="Registros de Mantenimientos"
+            local KEY_SECTOR="mantenimientos.${UPDATE_SECTOR}"
+            local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+            if [[ -n "$item_id" ]]; then
+                send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "update_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+            else
+                echo "Advertencia: No se pudo obtener el itemid para registrar el resultado." >&2
+            fi
+        fi
+    fi
+
+    # Display opcional o requerido después de update (similar a como estaba antes)
+    # Por ahora, lo hacemos siempre si se especificó un sector.
+    if [[ -n "$UPDATE_SECTOR" ]]; then
+        # Reutilizamos build_input_json_for_action para un modo "display"
+        # Temporalmente creamos una función específica o reutilizamos update con action=display
+        local display_json
+        display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$UPDATE_NAME" \
+            '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name}')
+
+        local disp_msg
+        disp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$display_json")
+        local disp_exit_code=$?
+
+        if [ $disp_exit_code -ne 0 ] || echo "$disp_msg" | grep -q "error\|Problema\|null"; then
+            echo "Advertencia: No se pudo obtener el estado actual del mantenimiento." >&2
+            echo "$disp_msg" >&2
+        else
+            echo "Estado actual del mantenimiento:"
+            echo "$disp_msg"
+            # Enviar resultado a Zabbix
+            if [[ -n "$item_id" ]]; then # Reutilizamos item_id obtenido antes
+                send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "display_maintenance" "success" "$disp_msg" "$HOST_LOG" "$KEY_SECTOR"
+            else
+                echo "Advertencia: No se pudo obtener el itemid para registrar el resultado de display." >&2
+            fi
+        fi
+    fi
+}
+
+cmd_delete() {
+    # Parseo específico para delete
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -n|--name)
+                if [[ -z "$2" ]]; then echo "Error: --name requiere un valor." >&2; exit 1; fi
+                DELETE_NAME="$2"; shift 2 ;;
+            --help|-h)
+                show_help_delete; exit 0 ;;
+            *)
+                echo "Error: opción desconocida para delete: $1" >&2; show_help_delete; exit 1 ;;
+        esac
+    done
+
+    # Validación de parámetros requeridos para delete
+    if [[ -z "$DELETE_NAME" ]]; then
+        echo "Error: Parámetro requerido faltante para delete: --name." >&2
+        show_help_delete
+        exit 1
+    fi
+
+    echo "Eliminar mantenimiento: $DELETE_NAME"
+    # Lógica de delete (requiere nueva función JS y adaptación del handler)
+    # local action_json = ...
+    # zabbix_js -s ... -p "$action_json"
+    echo "Funcionalidad de borrado no implementada aún." >&2
+    exit 1
+}
+
+cmd_list() {
+    # Parseo específico para list
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -f|--filter)
+                if [[ -z "$2" ]]; then echo "Error: --filter requiere un valor." >&2; exit 1; fi
+                LIST_FILTER="$2"; shift 2 ;;
+            --help|-h)
+                show_help_list; exit 0 ;;
+            *)
+                echo "Error: opción desconocida para list: $1" >&2; show_help_list; exit 1 ;;
+        esac
+    done
+
+    echo "Listar mantenimientos con filtro: $LIST_FILTER"
+    # Lógica de list (requiere nueva función JS y adaptación del handler)
+    # local action_json = ...
+    # zabbix_js -s ... -p "$action_json"
+    echo "Funcionalidad de listado no implementada aún." >&2
+    exit 1
 }
 
 # =============================================================================
 # 3. === INICIALIZACIÓN DEL SCRIPT ===
 # =============================================================================
 
-###set -e
-###set -u
+set -e
+set -u
 
 # Validar dependencias
 command -v zabbix_js >/dev/null 2>&1 || { echo "Error: zabbix_js no encontrado." >&2; exit 1; }
@@ -443,129 +782,65 @@ PROJECT_ROOT=$(find_project_root)
 # Ruta por defecto para el archivo de configuración (relativa a la raíz)
 DEFAULT_CONFIG_FILE="${PROJECT_ROOT}/config/default_params.conf"
 
+# Definir rutas basadas en la raíz del proyecto
+MAINTENANCE_HANDLER_JS="${PROJECT_ROOT}/src/maintenance_handler.js"
+
+# Validar existencia de archivos críticos
+if [ ! -f "$MAINTENANCE_HANDLER_JS" ]; then
+    echo "Error: Archivo de handler no encontrado: $MAINTENANCE_HANDLER_JS" >&2
+    exit 1
+fi
+
 # =============================================================================
-# 4. === PARSING DE ARGUMENTOS (getopts o while case) ===
+# 4. === PARSING DE ARGUMENTOS GLOBAL (autenticación, config, subcomando) ===
 # =============================================================================
 
-# Inicializamos la variable que contendrá la ruta del archivo de configuración
-CONFIG_FILE=""
-
-# Parseo de argumentos
+# Parseo de argumentos globales (antes de subcomandos)
 while [[ $# -gt 0 ]]; do
     case $1 in
         -c|--config)
-            if [[ -z "$2" ]]; then
-                echo "Error: --config requiere un valor." >&2
-                exit 1
-            fi
-            CONFIG_FILE="$2"
-            shift 2
-            ;;
+            if [[ -z "$2" ]]; then echo "Error: --config requiere un valor." >&2; exit 1; fi
+            CONFIG_FILE="$2"; shift 2 ;;
         -u|--zbx-url)
-            if [[ -z "$2" ]]; then
-                echo "Error: --zbx-url requiere un valor." >&2
-                exit 1
-            fi
-            RAW_ZBX_URL="$2"
-            shift 2
-            ;;
-	-U|--zbx-user)
-            if [[ -z "$2" ]]; then
-                echo "Error: --zbx-user requiere un valor." >&2
-                exit 1
-            fi
-            ZBX_USER="$2"
-            shift 2
-            ;;
+            if [[ -z "$2" ]]; then echo "Error: --zbx-url requiere un valor." >&2; exit 1; fi
+            RAW_ZBX_URL="$2"; shift 2 ;;
+        -U|--zbx-user)
+            if [[ -z "$2" ]]; then echo "Error: --zbx-user requiere un valor." >&2; exit 1; fi
+            RAW_ZBX_USER="$2"; shift 2 ;;
         -P|--zbx-password)
-            if [[ -z "$2" ]]; then
-                echo "Error: --zbx-password requiere un valor." >&2
-                exit 1
-            fi
-            ZBX_PASSWORD="$2"
-            shift 2
-            ;;
+            if [[ -z "$2" ]]; then echo "Error: --zbx-password requiere un valor." >&2; exit 1; fi
+            RAW_ZBX_PASSWORD="$2"; shift 2 ;;
         -t|--zbx-apitoken)
-            if [[ -z "$2" ]]; then
-                echo "Error: --zbx-apitoken requiere un valor." >&2
-                exit 1
-            fi
-            RAW_ZBX_APITOKEN="$2"
-            shift 2
-            ;;
-        -m|--maintenance-name)
-            if [[ -z "$2" ]]; then
-                echo "Error: --maintenance-name requiere un valor." >&2
-                exit 1
-            fi
-            RAW_MAINTENANCE_NAME="$2"
-            shift 2
-            ;;
-        -p|--timeperiod-period)
-            if [[ -z "$2" ]]; then
-                echo "Error: --timeperiod-period requiere un valor." >&2
-                exit 1
-            fi
-            RAW_TIMEPERIOD_PERIOD="$2" # Guardamos sin parsear
-            shift 2
-            ;;
-        -s|--timeperiod-startdate)
-            if [[ -z "$2" ]]; then
-                echo "Error: --timeperiod-startdate requiere un valor." >&2
-                exit 1
-            fi
-            RAW_TIMEPERIOD_STARTDATE="$2" # Guardamos sin parsear
-            shift 2
-            ;;
-        -g|--groupnames)
-            if [[ -z "$2" ]]; then
-                echo "Error: --groupnames requiere un valor." >&2
-                exit 1
-            fi
-            RAW_GROUPNAMES="$2"
-            shift 2
-            ;;
-        -H|--hostnames)
-            if [[ -z "$2" ]]; then
-                echo "Error: --hostnames requiere un valor." >&2
-                exit 1
-            fi
-            RAW_HOSTNAMES="$2"
-            shift 2
-            ;;
-        -S|--sector)
-            if [[ -z "$2" ]]; then
-                echo "Error: --sector requiere un valor." >&2
-                exit 1
-            fi
-            RAW_SECTOR="$2"
-            shift 2
-            ;;
-        -h|--help)
-            show_help
-            exit 0
+            if [[ -z "$2" ]]; then echo "Error: --zbx-apitoken requiere un valor." >&2; exit 1; fi
+            RAW_ZBX_APITOKEN="$2"; shift 2 ;;
+        --help|-h)
+            show_help_general; exit 0 ;;
+        create|update|delete|list) # Identificamos el subcomando
+            COMMAND="$1"
+            shift
+            break
             ;;
         *)
-            echo "Error: opción desconocida: $1" >&2
-            echo "Use --help para ver las opciones disponibles." >&2
-            exit 1
-            ;;
+            echo "Error: opción desconocida: $1" >&2; show_help_general; exit 1 ;;
     esac
 done
 
-# Definir CONFIG_FILE definitivo: si no se pasó --config, usar el por defecto
+# Si no se especificó subcomando
+if [[ -z "$COMMAND" ]]; then
+    echo "Error: No se especificó un subcomando." >&2
+    show_help_general
+    exit 1
+fi
+
+# Definir CONFIG_FILE definitivo si no se pasó --config
 if [[ -z "$CONFIG_FILE" ]]; then
     CONFIG_FILE="$DEFAULT_CONFIG_FILE"
 fi
 
-# Cargar configuración *antes* de la validación final de parámetros obligatorios
-# Los argumentos de línea de comandos sobrescribirán los del archivo.
+# Cargar configuración *antes* de la autenticación
 if [ -f "$CONFIG_FILE" ]; then
     echo "Cargando configuración desde: $CONFIG_FILE" >&2
-    # Validar que sea un archivo regular antes de source
     if [[ -r "$CONFIG_FILE" && -f "$CONFIG_FILE" ]]; then
-        # Usar source de forma segura: solo si es un archivo regular y legible
-        # ATENCIÓN: Asegúrate de que el archivo .conf NO contenga comandos peligrosos.
         source "$CONFIG_FILE"
     else
         echo "Error: El archivo de configuración no es un archivo regular o no es legible: $CONFIG_FILE" >&2
@@ -576,43 +851,13 @@ else
     echo "Se usarán los valores proporcionados por banderas o vacíos." >&2
 fi
 
-# --- Aplicar valores de banderas (si existen) para sobrescribir la configuración ---
-# Este bloque aplica *después* del source, garantizando que las flags tengan precedencia.
-if [[ -n "$RAW_ZBX_URL" ]]; then
-    ZBX_URL="$RAW_ZBX_URL"
-fi
-if [[ -n "$RAW_ZBX_APITOKEN" ]]; then
-    ZBX_APITOKEN="$RAW_ZBX_APITOKEN"
-fi
-if [[ -n "$RAW_MAINTENANCE_NAME" ]]; then
-    MAINTENANCE_NAME="$RAW_MAINTENANCE_NAME"
-fi
-if [[ -n "$RAW_TIMEPERIOD_PERIOD" ]]; then
-    TIMEPERIOD_PERIOD="$RAW_TIMEPERIOD_PERIOD"
-fi
-if [[ -n "$RAW_TIMEPERIOD_STARTDATE" ]]; then
-    TIMEPERIOD_STARTDATE="$RAW_TIMEPERIOD_STARTDATE"
-fi
-if [[ -n "$RAW_GROUPNAMES" ]]; then
-    GROUPNAMES="$RAW_GROUPNAMES"
-fi
-if [[ -n "$RAW_HOSTNAMES" ]]; then
-    HOSTNAMES="$RAW_HOSTNAMES"
-fi
-if [[ -n "$RAW_SECTOR" ]]; then
-    SECTOR="$RAW_SECTOR"
-fi
+# Aplicar valores de banderas (si existen) para sobrescribir la configuración
+if [[ -n "$RAW_ZBX_URL" ]]; then ZBX_URL="$RAW_ZBX_URL"; fi
+if [[ -n "$RAW_ZBX_USER" ]]; then ZBX_USER="$RAW_ZBX_USER"; fi
+if [[ -n "$RAW_ZBX_PASSWORD" ]]; then ZBX_PASSWORD="$RAW_ZBX_PASSWORD"; fi
+if [[ -n "$RAW_ZBX_APITOKEN" ]]; then ZBX_APITOKEN="$RAW_ZBX_APITOKEN"; fi
 
-# Definir rutas basadas en la raíz del proyecto
-MAINTENANCE_HANDLER_JS="${PROJECT_ROOT}/src/maintenance_handler.js"
-
-# Validar existencia de archivos críticos
-if [ ! -f "$MAINTENANCE_HANDLER_JS" ]; then
-    echo "Error: Archivo de handler no encontrado: $MAINTENANCE_HANDLER_JS" >&2
-    exit 1
-fi
-
-# --- Inicio de lógica de autenticación (Acá va el punto 2) ---
+# --- Inicio de lógica de autenticación ---
 SESSION_TOKEN=""
 if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
     echo "Iniciando sesión en Zabbix como '$ZBX_USER'..." >&2
@@ -627,83 +872,32 @@ if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
     unset ZBX_PASSWORD
 fi
 
-# Validación de campos obligatorios (después de cargar la configuración y aplicar flags)
-if [[ -z "$ZBX_URL" || -z "$ZBX_APITOKEN" || -z "$MAINTENANCE_NAME" || -z "$TIMEPERIOD_PERIOD" || -z "$SECTOR" ]]; then
-    echo "Error: Faltan parámetros obligatorios." >&2
-    echo "Los siguientes parámetros son obligatorios: --zbx-url, --zbx-apitoken, --maintenance-name, --timeperiod-period, --sector" >&2
-    echo "Use --help para ver el uso." >&2
+# Validación de campos obligatorios comunes (después de cargar la configuración, aplicar flags y autenticación)
+if [[ -z "$ZBX_URL" || -z "$ZBX_APITOKEN" ]]; then
+    echo "Error: Faltan parámetros obligatorios comunes (zbx_url, zbx_apitoken)." >&2
+    echo "Use --help para ver el uso general." >&2
     exit 1
 fi
 
-# --- Parseo final de parámetros que requieren transformación ---
-# Parsear TIMEPERIOD_PERIOD (puede venir de flag o de archivo de configuración)
-TIMEPERIOD_PERIOD=$(parse_time_to_seconds "$TIMEPERIOD_PERIOD")
-if [[ $? -ne 0 ]]; then
-    echo "Fallo al procesar el periodo: $TIMEPERIOD_PERIOD" >&2
-    exit 1
-fi
+# =============================================================================
+# 5. === EJECUCIÓN DEL SUBCOMANDO ===
+# =============================================================================
 
-# Parsear TIMEPERIOD_STARTDATE (puede venir de flag o de archivo de configuración)
-if [[ -n "$TIMEPERIOD_STARTDATE" ]]; then
-    TIMEPERIOD_STARTDATE=$(parse_datetime_to_timestamp "$TIMEPERIOD_STARTDATE")
-    if [[ $? -ne 0 ]]; then
-        echo "Fallo al procesar la fecha: $TIMEPERIOD_STARTDATE" >&2
+case "$COMMAND" in
+    create)  cmd_create "$@" ;;
+    update)  cmd_update "$@" ;;
+    delete)  cmd_delete "$@" ;;
+    list)    cmd_list "$@" ;;
+    *)
+        echo "Error: Subcomando desconocido: $COMMAND" >&2
+        show_help_general
         exit 1
-    fi
-else
-    # Si no se especifica startdate, usar timestamp actual
-    TIMEPERIOD_STARTDATE=$(date +%s)
-fi
-
-# Escapar cadenas para JSON
-ZBX_URL_ESC=$(escape_json "$ZBX_URL")
-ZBX_APITOKEN_ESC=$(escape_json "$ZBX_APITOKEN")
-MAINTENANCE_NAME_ESC=$(escape_json "$MAINTENANCE_NAME")
-GROUPNAMES_ESC=$(escape_json "$GROUPNAMES")
-HOSTNAMES_ESC=$(escape_json "$HOSTNAMES")
+        ;;
+esac
 
 # =============================================================================
-# 5. === LÓGICA PRINCIPAL ===
+# 6. === FINALIZACIÓN (logout, etc.) ===
 # =============================================================================
-
-# --- Ejecución del modo update ---
-RUN_MODE="update_maintenance"
-HOST_LOG="Registros de Mantenimientos"
-KEY_SECTOR="mantenimientos.${SECTOR}"
-
-item_id=$(get_itemid "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$HOST_LOG" "$KEY_SECTOR")
-
-# Construimos el json de entrada del "$MAINTENANCE_HANDLER_JS"
-INPUT_JSON="$(build_input_json)"
-
-echo "🚀 Ejecutando: update_maintenance..."
-
-# Ejecutamos zabbix_js con el JSON como parámetro
-rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$INPUT_JSON")
-exit_code=$?
-
-if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
-    send_result "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$item_id" "update_maintenance" "error" "zabbix_js falló o devolvió error: $rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
-    exit 1
-else
-    send_result "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$item_id" "update_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
-fi
-
-# --- Ejecución del modo display ---
-RUN_MODE="display_maintenance"
-INPUT_JSON="$(build_input_json)"
-
-exit_code=$?
-
-if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema\|null"; then
-    send_result "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$item_id" "display_maintenance" "error" "No se pudo obtener estado actual: $rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
-    # No es crítico, pero debe reportarse
-else
-    send_result "$ZBX_URL_ESC" "$ZBX_APITOKEN_ESC" "$item_id" "display_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
-fi
-
-# Capturar el código de salida
-EXIT_CODE=$?
 
 # Si se inició sesión, intentar cerrarla
 if [[ -n "$SESSION_TOKEN" ]]; then
@@ -711,11 +905,4 @@ if [[ -n "$SESSION_TOKEN" ]]; then
     zbx_logout "$ZBX_URL" "$SESSION_TOKEN" >/dev/null 2>&1 || true # Ignorar error de logout
 fi
 
-# Manejo básico del error (aunque ya debería haber salido si hubo error crítico)
-if [ $EXIT_CODE -ne 0 ]; then
-    echo "Error: Algo falló en el flujo principal con código $EXIT_CODE" >&2
-    exit $EXIT_CODE
-fi
-
 exit 0
-#Comentario de prueba
