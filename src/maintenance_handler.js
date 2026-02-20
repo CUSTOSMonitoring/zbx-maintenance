@@ -263,6 +263,85 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
 }
 
 
+/**
+ * Crea un nuevo mantenimiento en Zabbix.
+ *
+ * @param {string} url - URL del endpoint de la API de Zabbix.
+ * @param {string} token - Token de API o Session Token.
+ * @param {string} maintenance_name - Nombre del mantenimiento.
+ * @param {number} maintenance_active_since - Timestamp Unix de inicio del mantenimiento.
+ * @param {number} maintenance_active_till - Timestamp Unix de fin del mantenimiento.
+ * @param {number} maintenance_type - Tipo de mantenimiento (0: Normal, 1: No Data). Por defecto 0.
+ * @param {number} timeperiod_startdate - Timestamp Unix del inicio del período de mantenimiento.
+ * @param {number} timeperiod_period - Duración del período en segundos.
+ * @param {Array|null} hostids - Array de objetos hostid: [{"hostid": "1"}, ...] o null.
+ * @param {Array|null} groupids - Array de objetos groupid: [{"groupid": "2"}, ...] o null.
+ * @returns {Object|string} - Resultado de la API o mensaje de error.
+ */
+function create_maintenance(url, token, maintenance_name, maintenance_active_since, maintenance_active_till, maintenance_type, timeperiod_startdate, timeperiod_period, hostids, groupids) {
+    // Validación básica de parámetros requeridos
+    if (!url || !token || !maintenance_name || typeof maintenance_active_since !== 'number' || typeof maintenance_active_till !== 'number' || typeof timeperiod_startdate !== 'number' || typeof timeperiod_period !== 'number') {
+        return "Error: Parámetros inválidos para create_maintenance.";
+    }
+
+    // Asegurar valores por defecto
+    if (typeof maintenance_type === 'undefined' || maintenance_type === null) {
+        maintenance_type = 0; // With data collection
+    }
+
+    try {
+        var req = new HttpRequest();
+        req.addHeader('Content-Type: application/json');
+        req.addHeader('Authorization: Bearer ' + token);
+
+        var jdata = {
+            "jsonrpc": "2.0",
+            "method": "maintenance.create",
+            "params": {
+                "name": maintenance_name,
+                "active_since": maintenance_active_since,
+                "active_till": maintenance_active_till,
+                "maintenance_type": maintenance_type,
+                "timeperiods": [
+                    {
+                        "timeperiod_type": 0, // One time only
+                        "start_date": timeperiod_startdate,
+                        "period": timeperiod_period
+                    }
+                ]
+            },
+            "id": 1
+        };
+
+        // Agregar hosts si se proveen
+        if (hostids && Array.isArray(hostids) && hostids.length > 0) {
+            jdata.params.hosts = hostids;
+        }
+
+        // Agregar grupos si se proveen
+        if (groupids && Array.isArray(groupids) && groupids.length > 0) {
+            jdata.params.groups = groupids;
+        }
+
+        var response = req.get(url, JSON.stringify(jdata));
+
+        // Intentar parsear la respuesta
+        var parsedResponse = JSON.parse(response);
+
+        // Verificar si la API devolvió un error
+        if (parsedResponse.error) {
+            return "Error de la API Zabbix en create_maintenance: " + JSON.stringify(parsedResponse.error);
+        }
+
+        // Devolver el resultado exitoso
+        return parsedResponse.result;
+
+    } catch (error) {
+        return "Error al crear el mantenimiento: " + error;
+    }
+}
+
+
 
 var input = JSON.parse(value);
 
