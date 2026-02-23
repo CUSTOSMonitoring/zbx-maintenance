@@ -168,6 +168,7 @@ zbx_login() {
     fi
 
     # Construimos el body de la solicitud de login
+    # CORRECCIÓN: El parámetro es "username", no "user"
     local json_body
     json_body=$(jq -n --arg user "$username" --arg pass "$password" '
         {
@@ -432,9 +433,17 @@ build_input_json_for_action() {
 # Función: mostrar ayuda general
 show_help_general() {
     cat << 'EOF'
-Uso: run_maintenance.sh <comando> [OPCIONES]
+Uso: run_maintenance.sh [OPCIONES_GLOBALES] <comando> [OPCIONES_DEL_COMANDO]
 
 Herramienta para gestionar mantenimientos en Zabbix.
+
+Opciones globales:
+    -u, --zbx-url URL               URL del API de Zabbix (ej: https://zabbix/api_jsonrpc.php)
+    -U, --zbx-user USER             Usuario de Zabbix para autenticación por sesión.
+    -P, --zbx-password PASS         Contraseña de Zabbix para autenticación por sesión.
+    -t, --zbx-apitoken TOKEN        Token de API de Zabbix (alternativa a usuario/contraseña).
+    -c, --config PATH               Ruta al archivo de configuración (por defecto: config/default_params.conf)
+    -h, --help                      Muestra esta ayuda general y sale
 
 Comandos:
     create      Crea un nuevo mantenimiento.
@@ -767,8 +776,8 @@ cmd_list() {
 # 3. === INICIALIZACIÓN DEL SCRIPT ===
 # =============================================================================
 
-set -e
-set -u
+#set -e ##DEBUG
+#set -u ##DEBUG
 
 # Validar dependencias
 command -v zabbix_js >/dev/null 2>&1 || { echo "Error: zabbix_js no encontrado." >&2; exit 1; }
@@ -796,6 +805,7 @@ fi
 # =============================================================================
 
 # Parseo de argumentos globales (antes de subcomandos)
+# Este loop debe PARAR cuando encuentre un subcomando, sin consumirlo aún de $@
 while [[ $# -gt 0 ]]; do
     case $1 in
         -c|--config)
@@ -815,9 +825,10 @@ while [[ $# -gt 0 ]]; do
             RAW_ZBX_APITOKEN="$2"; shift 2 ;;
         --help|-h)
             show_help_general; exit 0 ;;
-        create|update|delete|list) # Identificamos el subcomando
+        # Identificamos el subcomando, PERO NO LO CONSUMIMOS AÚN
+        create|update|delete|list)
             COMMAND="$1"
-            shift
+            # Rompemos el loop global, $@ aún contiene el subcomando y sus args
             break
             ;;
         *)
@@ -825,7 +836,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Si no se especificó subcomando
+# Si no se especificó subcomando (porque el loop consumió todos los args sin encontrar uno)
 if [[ -z "$COMMAND" ]]; then
     echo "Error: No se especificó un subcomando." >&2
     show_help_general
@@ -879,10 +890,14 @@ if [[ -z "$ZBX_URL" || -z "$ZBX_APITOKEN" ]]; then
     exit 1
 fi
 
+# Ahora, SHIFT el subcomando de $@ para que queden solo los args específicos del subcomando
+shift # Esto elimina el nombre del subcomando (e.g., 'create') de $@
+
 # =============================================================================
 # 5. === EJECUCIÓN DEL SUBCOMANDO ===
 # =============================================================================
 
+# Llamamos al subcomando con sus argumentos específicos
 case "$COMMAND" in
     create)  cmd_create "$@" ;;
     update)  cmd_update "$@" ;;
