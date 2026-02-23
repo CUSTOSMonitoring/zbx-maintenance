@@ -343,35 +343,126 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
 
 
 
-var input = JSON.parse(value);
+// --- LÓGICA PRINCIPAL: Leer 'action' y llamar a la función correspondiente ---
 
-var ZbxURL = input.zbx_url;
-var ZbxApiToken = input.zbx_apitoken;
-var MaintenanceName = input.maintenance_name;
-var TimePeriodStartDate = input.timeperiod_startdate;
-var TimePeriodPeriod = parseInt(input.timeperiod_period);
-var Hostnames = input.hostnames;
-var Groupnames = input.groupnames;
+try {
+    var input = JSON.parse(value);
 
-var RunMode = input.run_mode || "update_maintenance";
+    var action = input.action; // <-- Campo clave del nuevo flujo
+    var url = input.zbx_url;
+    var token = input.zbx_apitoken;
+    var maintenanceName = input.maintenance_name;
 
-var MaintenanceIDs = get_maintenance_id(ZbxURL, ZbxApiToken, MaintenanceName);
-MaintenanceIDs = extractIds(MaintenanceIDs, "maintenanceid");
+    var result;
 
-if (RunMode == "display_maintenance") {
-    var MaintenanceInfo = display_maintenance(ZbxURL, ZbxApiToken, MaintenanceIDs[0])
-    MaintenanceInfo = format_display(MaintenanceInfo)
-    return JSON.stringify(MaintenanceInfo);
+    switch(action) {
+        case 'create':
+            // Parsear nombres de hosts y grupos
+            var hostnames_arr = parse_names(input.hostnames || "");
+            var groupnames_arr = parse_names(input.groupnames || "");
+
+            // Obtener IDs de hosts y grupos
+            var hostObjects = get_host_id(url, token, hostnames_arr);
+            var groupObjects = get_group_id(url, token, groupnames_arr);
+
+            // Extraer solo los IDs numéricos como objetos {hostid: "..."} o {groupid: "..."}
+            var hostIds = (hostObjects && Array.isArray(hostObjects)) ? extractIds(hostObjects, "hostid").map(function(id) { return {"hostid": id}; }) : [];
+            var groupIds = (groupObjects && Array.isArray(groupObjects)) ? extractIds(groupObjects, "groupid").map(function(id) { return {"groupid": id}; }) : [];
+
+            // Validar que no haya errores en la obtención de IDs antes de llamar a create
+            if (hostObjects && hostObjects.error) {
+                 result = hostObjects; // Devuelve el objeto de error
+            } else if (groupObjects && groupObjects.error) {
+                 result = groupObjects; // Devuelve el objeto de error
+            } else {
+                 // Llamar a create_maintenance con los IDs extraídos
+                 result = create_maintenance(
+                     url,
+                     token,
+                     maintenanceName,
+                     input.maintenance_active_since,
+                     input.maintenance_active_till,
+                     input.maintenance_type,
+                     input.timeperiod_startdate,
+                     input.timeperiod_period,
+                     hostIds, // Pasar array de {hostid: "..."}
+                     groupIds // Pasar array de {groupid: "..."}
+                 );
+            }
+            break;
+        case 'update':
+            // Parsear nombres de hosts y grupos
+            var hostnames_arr = parse_names(input.hostnames || "");
+            var groupnames_arr = parse_names(input.groupnames || "");
+
+            // Obtener IDs de hosts y grupos
+            var hostObjects = get_host_id(url, token, hostnames_arr);
+            var groupObjects = get_group_id(url, token, groupnames_arr);
+
+            // Extraer solo los IDs numéricos como objetos {hostid: "..."} o {groupid: "..."}
+            var hostIds = (hostObjects && Array.isArray(hostObjects)) ? extractIds(hostObjects, "hostid").map(function(id) { return {"hostid": id}; }) : [];
+            var groupIds = (groupObjects && Array.isArray(groupObjects)) ? extractIds(groupObjects, "groupid").map(function(id) { return {"groupid": id}; }) : [];
+
+            // Obtener ID del mantenimiento a actualizar
+            var maintenanceDetails = get_maintenance_id(url, token, maintenanceName);
+            var maintenanceId = null;
+            if (Array.isArray(maintenanceDetails) && maintenanceDetails.length > 0) {
+                maintenanceId = extractIds(maintenanceDetails, "maintenanceid")[0];
+            }
+
+            if (!maintenanceId) {
+                 result = {"error": "Mantenimiento no encontrado para actualizar: " + maintenanceName};
+            } else if (hostObjects && hostObjects.error) {
+                 result = hostObjects; // Devuelve el objeto de error
+            } else if (groupObjects && groupObjects.error) {
+                 result = groupObjects; // Devuelve el objeto de error
+            } else {
+                 // Llamar a upd_maintenance con los IDs extraídos
+                 result = upd_maintenance(
+                     url,
+                     token,
+                     maintenanceId,
+                     input.timeperiod_startdate,
+                     input.timeperiod_period,
+                     hostIds, // Pasar array de {hostid: "..."}
+                     groupIds // Pasar array de {groupid: "..."}
+                 );
+            }
+            break;
+        case 'display':
+            // Lógica para display (ejemplo, usando la función existente)
+            var maintenanceDetails = get_maintenance_id(url, token, maintenanceName);
+            var maintenanceId = null;
+            if (Array.isArray(maintenanceDetails) && maintenanceDetails.length > 0) {
+                maintenanceId = extractIds(maintenanceDetails, "maintenanceid")[0];
+            }
+            if (maintenanceId) {
+                 var displayInfo = display_maintenance(url, token, maintenanceId);
+                 if (displayInfo && Array.isArray(displayInfo) && displayInfo.length > 0) {
+                     result = format_display(displayInfo)[0]; // Formatear y devolver el primer elemento
+                 } else {
+                     result = {"error": "No se pudo obtener la información detallada del mantenimiento."};
+                 }
+            } else {
+                 result = {"error": "Mantenimiento no encontrado para mostrar: " + maintenanceName};
+            }
+            break;
+        // --- AÑADIR OTROS CASES AQUÍ ---
+        // case 'delete':
+        //     // Lógica para delete
+        //     break;
+        // case 'list':
+        //     // Lógica para list
+        //     break;
+        default:
+            result = {"error": "Acción desconocida recibida: " + action};
+    }
+
+    // Devolver el resultado como string JSON
+    return JSON.stringify(result);
+
+} catch (e) {
+    return JSON.stringify({"error": "Error procesando la solicitud en el handler: " + e.message});
 }
 
-var Hostnames_arr = parse_names(Hostnames);
-var HostIds = get_host_id(ZbxURL, ZbxApiToken, Hostnames_arr);
-
-var Groupnames_arr = parse_names(Groupnames);
-var GroupIds = get_group_id(ZbxURL, ZbxApiToken, Groupnames_arr);
-
-var MaintenanceRes = upd_maintenance(ZbxURL, ZbxApiToken, MaintenanceIDs[0], TimePeriodStartDate, TimePeriodPeriod, HostIds, GroupIds);
-res = MaintenanceRes;
-
-
-return JSON.stringify(res);
+// Fin del script
