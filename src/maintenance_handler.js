@@ -453,6 +453,61 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
     }
 }
 
+// --- NUEVAS FUNCIONES ---
+
+/**
+ * Obtiene una lista de mantenimientos cuyo nombre comienza con un prefijo específico.
+ *
+ * @param {string} url - URL del endpoint de la API de Zabbix.
+ * @param {string} token - Token de API o Session Token.
+ * @param {string} maintenance_prefix - Prefijo del nombre de los mantenimientos a buscar.
+ * @returns {Array|Object} - Array de objetos {maintenanceid, name} o un objeto {error: "mensaje"}.
+ */
+function list_maintenances(url, token, maintenance_prefix) {
+    // Validación básica de parámetros
+    if (!url || !token || typeof maintenance_prefix !== 'string') {
+        return { "error": "Parámetros inválidos para list_maintenances." };
+    }
+
+    try {
+        var req = new HttpRequest();
+        req.addHeader('Content-Type: application/json');
+        req.addHeader('Authorization: Bearer ' + token);
+
+        var jdata = {
+            "jsonrpc": "2.0",
+            "method": "maintenance.get",
+            "params": {
+                // Usamos 'search' para buscar por nombre
+                "search": {
+                    "name": maintenance_prefix
+                },
+                // Usamos 'startSearch' para que coincida solo al inicio del nombre
+                "startSearch": true,
+                // Solicitamos solo las propiedades requeridas
+                "output": ["maintenanceid", "name"]
+            },
+            "id": 1
+        };
+
+        var response = req.get(url, JSON.stringify(jdata));
+
+        // Intentar parsear la respuesta
+        var parsedResponse = JSON.parse(response);
+
+        // Verificar si la API devolvió un error
+        if (parsedResponse.error) {
+            return { "error": "Error de la API Zabbix en list_maintenances: " + JSON.stringify(parsedResponse.error) };
+        }
+
+        // Devolver la lista de mantenimientos encontrados
+        // Si no hay coincidencias, la API devuelve un array vacío []
+        return parsedResponse.result;
+
+    } catch (error) {
+        return { "error": "Error al listar los mantenimientos: " + error };
+    }
+}
 
 
 // --- LÓGICA PRINCIPAL: Leer 'action' y llamar a la función correspondiente ---
@@ -608,13 +663,12 @@ try {
                  result = {"error": "Mantenimiento no encontrado para mostrar: " + maintenanceName};
             }
             break;
-        // --- AÑADIR OTROS CASES AQUÍ ---
-        // case 'delete':
+        // case 'delete': //AUN NO IMPLEMENTADO
         //     // Lógica para delete
         //     break;
-        // case 'list':
-        //     // Lógica para list
-        //     break;
+        case 'list':
+            result = list_maintenances(url, token, input.maintenance_prefix);
+            break;
         default:
             result = {"error": "Acción desconocida recibida: " + action};
     }
