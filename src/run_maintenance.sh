@@ -19,6 +19,7 @@ ZBX_APITOKEN="" # Para API (puede ser API Token o Session Token)
 CONFIG_FILE="" # Ruta al archivo de configuración
 PROJECT_ROOT=""
 MAINTENANCE_HANDLER_JS=""
+PREFIX_MAINTENANCE_NAME="[Web Mantenimientos] "
 
 # Variables temporales para parseo de argumentos globales (antes de subcomandos)
 RAW_ZBX_URL=""
@@ -36,6 +37,7 @@ CREATE_PERIOD=""
 CREATE_STARTDATE=""
 CREATE_HOSTNAMES=""
 CREATE_GROUPNAMES=""
+CREATE_SECTOR="" # Necesario para el registro en Zabbix
 # UPDATE
 UPDATE_NAME=""
 UPDATE_PERIOD=""
@@ -456,6 +458,49 @@ build_input_json_for_action() {
     esac
 }
 
+# Función para ejecutar el modo 'display' y reportar resultados a stdout y Zabbix
+# Recibe el nombre del mantenimiento y el sector.
+execute_display_and_report() {
+    local disp_maintenance_name="$1"
+    local disp_sector="$2"
+
+    if [[ -z "$disp_maintenance_name" || -z "$disp_sector" ]]; then
+        echo "Error: execute_display_and_report requiere 'maintenance_name' y 'sector'." >&2
+        return 1
+    fi
+
+    # Construimos el JSON de entrada para el handler, en modo 'display'
+    local display_json
+    display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$disp_maintenance_name" \
+        '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name}')
+
+    local disp_msg
+    disp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$display_json")
+    local disp_exit_code=$?
+
+    if [ $disp_exit_code -ne 0 ] || echo "$disp_msg" | grep -q "error\|Problema\|null"; then
+        echo "Advertencia: No se pudo obtener el estado actual del mantenimiento '$disp_maintenance_name'." >&2
+        echo "$disp_msg" >&2
+        return 1 # O 0, dependiendo si quieres que un fallo en display detenga el flujo principal
+    else
+        echo "Estado actual del mantenimiento '$disp_maintenance_name':"
+        echo "$disp_msg"
+
+        # Enviar resultado a Zabbix
+        local HOST_LOG="Registros de Mantenimientos"
+        local KEY_SECTOR="mantenimientos.${disp_sector}"
+        local item_id
+        item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+        if [[ -n "$item_id" ]]; then
+            send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "display_maintenance" "success" "$disp_msg" "$HOST_LOG" "$KEY_SECTOR"
+        else
+            echo "Advertencia: No se pudo obtener el itemid para registrar el resultado de display del mantenimiento '$disp_maintenance_name'." >&2
+            return 1 # O 0, PENDIENTE: evaluar que tan critico puede ser esto
+        fi
+    fi
+    return 0
+}
+
 
 # --- Funciones de ayuda ---
 
@@ -500,6 +545,7 @@ Opciones:
     --startdate STARTDATE           Fecha/hora de inicio del primer período (timestamp o formato yyyy-mm-dd hh:mm:ss). Por defecto, ahora.
     -H, --hostnames LIST            Lista de hosts separados por comas.
     -G, --groupnames LIST           Lista de grupos separados por comas.
+    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
 
 Ejemplo:
     ./run_maintenance.sh create \
@@ -591,6 +637,9 @@ cmd_create() {
             -G|--groupnames)
                 if [[ -z "$2" ]]; then echo "Error: --groupnames requiere un valor." >&2; exit 1; fi
                 CREATE_GROUPNAMES="$2"; shift 2 ;;
+            -S|--sector) # Este parámetro es para el registro en Zabbix
+                if [[ -z "$2" ]]; then echo "Error: --sector requiere un valor." >&2; exit 1; fi
+                CREATE_SECTOR="$2"; shift 2 ;;
             --help|-h)
                 show_help_create; exit 0 ;;
             *)
@@ -603,6 +652,12 @@ cmd_create() {
         echo "Error: Parámetros requeridos faltantes para create." >&2
         show_help_create
         exit 1
+    fi
+
+
+    # Agregamos un prefijo al nombre del mantenimiento gestionado por este proyecto
+    if [[ -n "$CREATE_NAME" ]]; then
+        CREATE_NAME="${PREFIX_MAINTENANCE_NAME}${CREATE_NAME}"
     fi
 
     # Parseo de valores (timestamps, periodos)
@@ -633,11 +688,23 @@ cmd_create() {
         echo "Mantenimiento creado exitosamente:"
         echo "$rsp_msg"
         # Opcional: enviar resultado a Zabbix (requiere item_id y sector)
-        # local HOST_LOG="Registros de Mantenimientos"
-        # local KEY_SECTOR="mantenimientos.${SECTOR_DEFAULT_IF_ANY}" # Deberías pasar el sector o tener uno por defecto si aplica
-        # local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
-        # send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "create_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+        local HOST_LOG="Registros de Mantenimientos"
+        local KEY_SECTOR="mantenimientos.${SECTOR_DEFAULT_IF_ANY}" # Deberías pasar el sector o tener uno por defecto si aplica
+        local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+        send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "create_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
     fi
+
+    # Display opcional o requerido después de create (si se especificó un sector)
+    # Por ahora, lo hacemos siempre si se especificó un sector.
+    if [[ -n "$CREATE_SECTOR" ]]; then # Asumiendo que defines CREATE_SECTOR en cmd_create o uses una variable global si aplica
+        execute_display_and_report "$CREATE_NAME" "$CREATE_SECTOR"
+        # Opcional: Manejar retorno
+        # local disp_ret=$?
+        # if [ $disp_ret -ne 0 ]; then
+        #     echo "Advertencia: El proceso de display finalizó con errores." >&2
+        # fi
+    fi
+
 }
 
 cmd_update() {
@@ -688,8 +755,8 @@ cmd_update() {
     # Parseo de valores (si se proporcionaron)
     local update_period_sec=""
     local update_startdate_ts=""
-    local update_since_ts="" # <--- NUEVO
-    local update_till_ts=""  # <--- NUEVO
+    local update_since_ts=""
+    local update_till_ts=""
 
     if [[ -n "$UPDATE_PERIOD" ]]; then
         update_period_sec=$(parse_time_to_seconds "$UPDATE_PERIOD") || exit 1
@@ -720,7 +787,7 @@ cmd_update() {
     # Construimos el JSON de entrada para el handler, incluyendo la acción
     local action_json
     action_json=$(build_input_json_for_action "update")
-    echo "->${action_json}<-" ###DEBUG
+    #echo "->${action_json}<-" ###DEBUG
 
     # Llamamos al handler JavaScript con el nuevo JSON
     local rsp_msg
@@ -751,33 +818,17 @@ cmd_update() {
     # Display opcional o requerido después de update (similar a como estaba antes)
     # Por ahora, lo hacemos siempre si se especificó un sector.
     if [[ -n "$UPDATE_SECTOR" ]]; then
-        # Reutilizamos build_input_json_for_action para un modo "display"
-        # Temporalmente creamos una función específica o reutilizamos update con action=display
-        local display_json
-        display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$UPDATE_NAME" \
-            '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name}')
-
-        local disp_msg
-        disp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$display_json")
-        local disp_exit_code=$?
-
-        if [ $disp_exit_code -ne 0 ] || echo "$disp_msg" | grep -q "error\|Problema\|null"; then
-            echo "Advertencia: No se pudo obtener el estado actual del mantenimiento." >&2
-            echo "$disp_msg" >&2
-        else
-            echo "Estado actual del mantenimiento:"
-            echo "$disp_msg"
-            # Enviar resultado a Zabbix
-            local HOST_LOG="Registros de Mantenimientos" # Reutilizamos las variables del bloque anterior
-            local KEY_SECTOR="mantenimientos.${UPDATE_SECTOR}"
-            local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
-            if [[ -n "$item_id" ]]; then # Reutilizamos item_id obtenido antes
-                send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "display_maintenance" "success" "$disp_msg" "$HOST_LOG" "$KEY_SECTOR"
-            else
-                echo "Advertencia: No se pudo obtener el itemid para registrar el resultado de display." >&2
-            fi
-        fi
+        # LLAMAMOS A LA NUEVA FUNCIÓN
+        execute_display_and_report "$UPDATE_NAME" "$UPDATE_SECTOR"
+        # Opcional: Puedes manejar el código de retorno si es crítico que display funcione
+        # local disp_ret=$?
+        # if [ $disp_ret -ne 0 ]; then
+        #     echo "Advertencia: El proceso de display finalizó con errores." >&2
+        #     # Decide si es crítico o no
+        #     # exit $disp_ret # Si es crítico
+        # fi
     fi
+
 }
 
 cmd_delete() {
