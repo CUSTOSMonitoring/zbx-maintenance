@@ -1,4 +1,3 @@
 .*
 config/default_params.conf
 src/_*
-test/
