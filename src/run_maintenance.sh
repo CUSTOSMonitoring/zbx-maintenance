@@ -20,12 +20,14 @@ CONFIG_FILE="" # Ruta al archivo de configuración
 PROJECT_ROOT=""
 MAINTENANCE_HANDLER_JS=""
 PREFIX_MAINTENANCE_NAME="[Web Mantenimientos] "
+PREFIX_MAINTENANCE_NAME="AAAAAA"
 
 # Variables temporales para parseo de argumentos globales (antes de subcomandos)
 RAW_ZBX_URL=""
 RAW_ZBX_USER=""
 RAW_ZBX_PASSWORD=""
 RAW_ZBX_APITOKEN=""
+RAW_PREFIX_MAINTENANCE_NAME=""
 
 # Variables específicas por subcomando (declaradas vacías aquí)
 # CREATE
@@ -522,8 +524,8 @@ Opciones globales:
 Comandos:
     create      Crea un nuevo mantenimiento.
     update      Actualiza un mantenimiento existente.
-    delete      Elimina un mantenimiento existente.
-    list        Lista mantenimientos existentes.
+    delete      Elimina un mantenimiento existente. (NO IMPLEMENTADO AUN)
+    list        Lista mantenimientos existentes gestionados por este proyecto (filtrados por prefijo).
 
 Use 'run_maintenance.sh <comando> --help' para ver opciones específicas de cada comando.
 EOF
@@ -595,15 +597,15 @@ EOF
 
 show_help_list() {
     cat << 'EOF'
-Uso: run_maintenance.sh list [OPCIONES]
+Uso: run_maintenance.sh list
 
-Lista mantenimientos en Zabbix.
+Lista mantenimientos existentes gestionados por este proyecto (filtrados por prefijo).
 
-Opciones:
-    -f, --filter FILTER             Filtro opcional para la búsqueda (nombre, etc.).
+Esta acción no requiere parámetros adicionales. El prefijo utilizado para filtrar
+los mantenimientos se define en la configuración global del script o en el archivo de configuración.
 
 Ejemplo:
-    ./run_maintenance.sh list --filter "Prod"
+    ./run_maintenance.sh list
 EOF
 }
 
@@ -861,12 +863,12 @@ cmd_delete() {
 }
 
 cmd_list() {
-    # Parseo específico para list
+    # No hay argumentos específicos para parsear en este subcomando
+    # Solo recibe $@ vacío o con --help
+
+    # Parseo específico para list (solo --help por ahora)
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -f|--filter)
-                if [[ -z "$2" ]]; then echo "Error: --filter requiere un valor." >&2; exit 1; fi
-                LIST_FILTER="$2"; shift 2 ;;
             --help|-h)
                 show_help_list; exit 0 ;;
             *)
@@ -874,12 +876,42 @@ cmd_list() {
         esac
     done
 
-    echo "Listar mantenimientos con filtro: $LIST_FILTER"
-    # Lógica de list (requiere nueva función JS y adaptación del handler)
-    # local action_json = ...
-    # zabbix_js -s ... -p "$action_json"
-    echo "Funcionalidad de listado no implementada aún." >&2
-    exit 1
+    # Validar que PREFIX_MAINTENANCE_NAME esté definido
+    if [[ -z "$PREFIX_MAINTENANCE_NAME" ]]; then
+        echo "Error: El prefijo para listar mantenimientos (PREFIX_MAINTENANCE_NAME) no está definido." >&2
+        exit 1
+    fi
+
+    echo "Listando mantenimientos con prefijo: '$PREFIX_MAINTENANCE_NAME'" >&2
+
+    # Construimos el JSON de entrada para el handler, incluyendo la acción y el prefijo
+    local action_json
+    action_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "list" --arg prefix "$PREFIX_MAINTENANCE_NAME" \
+        '{
+            zbx_url: $url,
+            zbx_apitoken: $token,
+            action: $act,
+            maintenance_prefix: $prefix
+        }')
+
+    # Llamamos al handler JavaScript con el nuevo JSON
+    local rsp_msg
+    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
+        echo "Error: Falló la listado de mantenimientos." >&2
+        echo "$rsp_msg" >&2
+        exit 1
+    else
+        echo "Mantenimientos encontrados:"
+        echo "$rsp_msg" | jq -r '.[] | "ID: \(.maintenanceid) - Name: \(.name)"' # Formatear salida si es un array
+        # Opcional: enviar resultado a Zabbix (requiere item_id y sector si aplica)
+        # local HOST_LOG="Registros de Mantenimientos"
+        # local KEY_SECTOR="mantenimientos.list" # O usar el sector si aplica
+        # local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+        # send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "list_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+    fi
 }
 
 # =============================================================================
@@ -933,6 +965,10 @@ while [[ $# -gt 0 ]]; do
         -t|--zbx-apitoken)
             if [[ -z "$2" ]]; then echo "Error: --zbx-apitoken requiere un valor." >&2; exit 1; fi
             RAW_ZBX_APITOKEN="$2"; shift 2 ;;
+        # Funcionalidad de prefix liberada, pero no probada. No recomendamos su uso aun
+        --prefix)
+            if [[ -z "$2" ]]; then echo "Error: --prefix requiere un valor." >&2; exit 1; fi
+            RAW_PREFIX_MAINTENANCE_NAME="$2"; shift 2 ;;
         --help|-h)
             show_help_general; exit 0 ;;
         # Identificamos el subcomando, PERO NO LO CONSUMIMOS AÚN
@@ -977,6 +1013,7 @@ if [[ -n "$RAW_ZBX_URL" ]]; then ZBX_URL="$RAW_ZBX_URL"; fi
 if [[ -n "$RAW_ZBX_USER" ]]; then ZBX_USER="$RAW_ZBX_USER"; fi
 if [[ -n "$RAW_ZBX_PASSWORD" ]]; then ZBX_PASSWORD="$RAW_ZBX_PASSWORD"; fi
 if [[ -n "$RAW_ZBX_APITOKEN" ]]; then ZBX_APITOKEN="$RAW_ZBX_APITOKEN"; fi
+if [[ -n "$RAW_PREFIX_MAINTENANCE_NAME" ]]; then PREFIX_MAINTENANCE_NAME="$RAW_PREFIX_MAINTENANCE_NAME"; fi
 
 # --- Inicio de lógica de autenticación ---
 SESSION_TOKEN=""
