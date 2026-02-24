@@ -40,6 +40,9 @@ CREATE_GROUPNAMES=""
 UPDATE_NAME=""
 UPDATE_PERIOD=""
 UPDATE_STARTDATE=""
+UPDATE_ACTIVE_SINCE=""
+UPDATE_ACTIVE_TILL=""
+UPDATE_TYPE=""
 UPDATE_HOSTNAMES=""
 UPDATE_GROUPNAMES=""
 UPDATE_SECTOR="" # Necesario para el registro en Zabbix
@@ -405,21 +408,47 @@ build_input_json_for_action() {
             ;;
         update)
             # Usar las variables UPDATE_*
+            # Inicializamos variables para el JSON con valores vacíos o nulos si no se definieron
+            local period_json="null"
+            local startdate_json="null"
+            local since_json="null"
+            local till_json="null"
+            local type_json="null"
+            local sector_json="null"
+
+            # Solo incluimos en el JSON los valores que fueron realmente especificados
+            if [[ -n "$UPDATE_PERIOD_SECONDS" ]]; then period_json="$UPDATE_PERIOD_SECONDS"; fi
+            if [[ -n "$UPDATE_STARTDATE_PARSED" ]]; then startdate_json="$UPDATE_STARTDATE_PARSED"; fi
+            if [[ -n "$UPDATE_ACTIVE_SINCE_PARSED" ]]; then since_json="$UPDATE_ACTIVE_SINCE_PARSED"; fi # <--- NUEVO
+            if [[ -n "$UPDATE_ACTIVE_TILL_PARSED" ]]; then till_json="$UPDATE_ACTIVE_TILL_PARSED"; fi   # <--- NUEVO
+            if [[ -n "$UPDATE_TYPE" ]]; then type_json="$UPDATE_TYPE"; fi                             # <--- NUEVO
+            if [[ -n "$UPDATE_SECTOR" ]]; then sector_json="$UPDATE_SECTOR"; fi                       # <--- Para display
+
             jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" \
-               --arg name "$UPDATE_NAME" --argjson start_date "$UPDATE_STARTDATE_PARSED" --argjson period "$UPDATE_PERIOD_SECONDS" \
-               --arg hostnames "$UPDATE_HOSTNAMES" --arg groupnames "$UPDATE_GROUPNAMES" --arg sector "$UPDATE_SECTOR" \
+               --arg name "$UPDATE_NAME" \
+               --argjson period_val "$period_json" \
+               --argjson start_date_val "$startdate_json" \
+               --argjson since_val "$since_json" \
+               --argjson till_val "$till_json" \
+               --argjson type_val "$type_json" \
+               --arg hostnames "$UPDATE_HOSTNAMES" --arg groupnames "$UPDATE_GROUPNAMES" \
+               --arg sector_val "$sector_json" \
                '{
                    zbx_url: $url,
                    zbx_apitoken: $token,
                    action: $act,
                    maintenance_name: $name,
-                   timeperiod_startdate: $start_date,
-                   timeperiod_period: $period,
+                   timeperiod_period: $period_val,
+                   timeperiod_startdate: $start_date_val,
+                   maintenance_active_since: $since_val, # <--- NUEVO
+                   maintenance_active_till: $till_val,   # <--- NUEVO
+                   maintenance_type: $type_val,          # <--- NUEVO
                    hostnames: $hostnames,
                    groupnames: $groupnames,
-                   sector: $sector
+                   sector: $sector_val
                }'
             ;;
+
         # Otros casos como delete, list...
         *)
             echo '{}' # JSON vacío por defecto si la acción no está implementada
@@ -624,6 +653,15 @@ cmd_update() {
             --startdate)
                 if [[ -z "$2" ]]; then echo "Error: --startdate requiere un valor." >&2; exit 1; fi
                 UPDATE_STARTDATE="$2"; shift 2 ;;
+            --active-since) # <--- NUEVO PARSEO
+                if [[ -z "$2" ]]; then echo "Error: --active-since requiere un valor." >&2; exit 1; fi
+                UPDATE_ACTIVE_SINCE="$2"; shift 2 ;;
+            --active-till)  # <--- NUEVO PARSEO
+                if [[ -z "$2" ]]; then echo "Error: --active-till requiere un valor." >&2; exit 1; fi
+                UPDATE_ACTIVE_TILL="$2"; shift 2 ;;
+            --type)         # <--- NUEVO PARSEO
+                if [[ -z "$2" ]]; then echo "Error: --type requiere un valor." >&2; exit 1; fi
+                UPDATE_TYPE="$2"; shift 2 ;;
             -H|--hostnames)
                 if [[ -z "$2" ]]; then echo "Error: --hostnames requiere un valor." >&2; exit 1; fi
                 UPDATE_HOSTNAMES="$2"; shift 2 ;;
@@ -650,21 +688,39 @@ cmd_update() {
     # Parseo de valores (si se proporcionaron)
     local update_period_sec=""
     local update_startdate_ts=""
+    local update_since_ts="" # <--- NUEVO
+    local update_till_ts=""  # <--- NUEVO
+
     if [[ -n "$UPDATE_PERIOD" ]]; then
         update_period_sec=$(parse_time_to_seconds "$UPDATE_PERIOD") || exit 1
     fi
     if [[ -n "$UPDATE_STARTDATE" ]]; then
         update_startdate_ts=$(parse_datetime_to_timestamp "$UPDATE_STARTDATE") || exit 1
     else
-        update_startdate_ts=$(date +%s)
+        # Si no se especifica startdate, usar timestamp actual (esto era antes)
+        # update_startdate_ts=$(date +%s) # Esto no es necesario aquí si se maneja en el handler
+        # Dejamos la variable vacía si no se definió, el handler lo tomará como "no cambiar"
+        update_startdate_ts=""
     fi
+
+    # Parseo de los nuevos valores (si se proporcionaron) # <--- NUEVO
+    if [[ -n "$UPDATE_ACTIVE_SINCE" ]]; then
+        update_since_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_SINCE") || exit 1
+    fi
+    if [[ -n "$UPDATE_ACTIVE_TILL" ]]; then
+        update_till_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_TILL") || exit 1
+    fi
+
     # Asignamos a variables globales para el JSON
     UPDATE_PERIOD_SECONDS="$update_period_sec"
     UPDATE_STARTDATE_PARSED="$update_startdate_ts"
+    UPDATE_ACTIVE_SINCE_PARSED="$update_since_ts"
+    UPDATE_ACTIVE_TILL_PARSED="$update_till_ts"
 
     # Construimos el JSON de entrada para el handler, incluyendo la acción
     local action_json
     action_json=$(build_input_json_for_action "update")
+    echo "->${action_json}<-" ###DEBUG
 
     # Llamamos al handler JavaScript con el nuevo JSON
     local rsp_msg
@@ -712,6 +768,9 @@ cmd_update() {
             echo "Estado actual del mantenimiento:"
             echo "$disp_msg"
             # Enviar resultado a Zabbix
+            local HOST_LOG="Registros de Mantenimientos" # Reutilizamos las variables del bloque anterior
+            local KEY_SECTOR="mantenimientos.${UPDATE_SECTOR}"
+            local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
             if [[ -n "$item_id" ]]; then # Reutilizamos item_id obtenido antes
                 send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "display_maintenance" "success" "$disp_msg" "$HOST_LOG" "$KEY_SECTOR"
             else
