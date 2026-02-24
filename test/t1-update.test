@@ -1,0 +1,7 @@
+# Ejemplo de comando update para el mantenimiento de test1
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    update \
+    --name "[Web Mantenimientos] Mantenimiento de Prueba desde MaintenanceHandler: v1" \
+    --startdate "2026-01-02 10:00:00" \
+    --period 15d \
+    --sector "test"

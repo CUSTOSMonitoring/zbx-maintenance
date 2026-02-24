@@ -1,0 +1,3 @@
+# Ejemplo de comando list
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    list

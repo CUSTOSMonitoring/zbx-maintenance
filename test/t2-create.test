@@ -1,0 +1,9 @@
+# Ejemplo de comando create: test2
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    create \
+    --name "Mantenimiento de Prueba desde MaintenanceHandler: v2" \
+    --active-since "2026-01-01 00:00:00" \
+    --active-till "2027-01-01 00:00:00" \
+    --period 8h \
+    --groupnames "Pruebas" \
+    --sector "test"
