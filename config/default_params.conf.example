@@ -4,20 +4,14 @@ ZBX_URL="https://tu-zabbix.com/api_jsonrpc.php"
 # Token de API con permisos para gestionar mantenimientos
 ZBX_APITOKEN="tu_token_aqui"
 
-# Nombre del mantenimiento existente en Zabbix
-MAINTENANCE_NAME="Nombre del Mantenimiento"
-
-# Duración del mantenimiento (en segundos o con unidades: 1d, 2h, 30m)
-TIMEPERIOD_PERIOD="7200"
-
-# Fecha de inicio (formato: yyyy-mm-dd o yyyy-mm-dd hh:mm:00)
-# Si se deja vacío, se usará la fecha/hora actual
-TIMEPERIOD_STARTDATE=""
-
 # Sector (usado para generar la key de Zabbix: mantenimientos.SECTOR)
 SECTOR="fallback"
 
+# Prefijo que contendrán todos los nombres de los mantenimientos gestionados por este proyecto
+PREFIX_MAINTENANCE_NAME="[Web Mantenimientos] "
+
 # Lista de hosts/grupos (separados por comas)
+# Util si trabajamos siempre con los mismos hosts/hostgroups
 HOSTNAMES="Servidor1, Servidor2"
 GROUPNAMES="Grupo1, Grupo2"
 
