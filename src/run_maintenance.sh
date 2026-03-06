@@ -19,8 +19,7 @@ ZBX_APITOKEN="" # Para API (puede ser API Token o Session Token)
 CONFIG_FILE="" # Ruta al archivo de configuración
 PROJECT_ROOT=""
 MAINTENANCE_HANDLER_JS=""
-PREFIX_MAINTENANCE_NAME="[Web Mantenimientos] "
-PREFIX_MAINTENANCE_NAME="AAAAAA"
+PREFIX_MAINTENANCE_NAME="[Web Mantenimientos] " #Prefijo que tendrán todos los mantenimientos gestionados por esta solución
 
 # Variables temporales para parseo de argumentos globales (antes de subcomandos)
 RAW_ZBX_URL=""
@@ -503,6 +502,94 @@ execute_display_and_report() {
     return 0
 }
 
+# Recibe el tipo de acción, el JSON de entrada para zabbix_js y el sector para reportar a Zabbix.
+execute_action_and_report() {
+    local action_type="$1" # "create" o "update"
+    local action_json="$2"
+    local action_sector="$3" # Puede ser vacío si no se debe reportar a Zabbix
+
+    # Validación básica
+    if [[ -z "$action_type" || -z "$action_json" ]]; then
+        echo "Error: execute_action_and_report requiere 'action_type' y 'action_json'." >&2
+        return 1
+    fi
+
+    # Llamamos al handler JavaScript con el JSON de entrada
+    local rsp_msg
+    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
+    local exit_code=$?
+
+    # Determinar si hubo error basado en el código de salida o contenido del mensaje
+    local has_error=0
+    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
+        has_error=1
+    fi
+
+    # Pre tipo de resultado para Zabbix
+    local user_message
+    local zbx_mode
+    local zbx_status
+    if [ $has_error -eq 0 ]; then
+        case "$action_type" in
+            create)
+                user_message="Mantenimiento creado exitosamente:"
+                ;;
+            update)
+                user_message="Mantenimiento actualizado exitosamente:"
+                ;;
+            *)
+                user_message="Resultado de la operación ($action_type):"
+                ;;
+        esac
+        zbx_mode="${action_type}_maintenance"
+        zbx_status="success"
+    else
+        case "$action_type" in
+            create)
+                user_message="Error: Falló la creación del mantenimiento."
+                ;;
+            update)
+                user_message="Error: Falló la actualización del mantenimiento."
+                ;;
+            *)
+                user_message="Error: Falló la operación ($action_type)."
+                ;;
+        esac
+        zbx_mode="${action_type}_maintenance"
+        zbx_status="error"
+    fi
+
+    # Imprimir resultado en stdout
+    echo "$user_message"
+    echo "$rsp_msg"
+
+    # Reportar a Zabbix si se proporcionó un sector
+    if [[ -n "$action_sector" ]]; then
+        local HOST_LOG="Registros de Mantenimientos"
+        local KEY_SECTOR="mantenimientos.${action_sector}"
+        local item_id
+        item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
+
+        if [[ -n "$item_id" ]]; then
+            send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "$zbx_mode" "$zbx_status" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+        else
+            echo "Advertencia: No se pudo obtener el itemid para registrar el resultado de $action_type en el sector '$action_sector'." >&2
+            # Opcional: Retornar 1 aquí si decidimos que puede llegar a ser un error critico
+            # return 1
+        fi
+    else
+        # Si no se proporciona sector, no reportamos a Zabbix, pero la operación puede continuar
+        echo "Info: No se especificó sector para reportar el resultado de $action_type a Zabbix." >&2
+    fi
+
+    # Si hubo error en la ejecución del handler, retornamos un código de error
+    # para que la función llamadora pueda actuar en consecuencia (por ejemplo, salir del script).
+    if [ $has_error -eq 1 ]; then
+        return 1
+    fi
+
+    return 0
+}
 
 # --- Funciones de ayuda ---
 
@@ -677,23 +764,12 @@ cmd_create() {
     local action_json
     action_json=$(build_input_json_for_action "create")
 
-    # Llamamos al handler JavaScript con el nuevo JSON
-    local rsp_msg
-    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
-        echo "Error: Falló la creación del mantenimiento." >&2
-        echo "$rsp_msg" >&2
+    # Pasamos "create", el JSON, y el sector
+    if ! execute_action_and_report "create" "$action_json" "$CREATE_SECTOR"; then
+        # Si execute_action_and_report falla (retorno != 0), es porque hubo un error crítico en la ejecución del handler
+        # y ya se reportó. Podemos salir del script aquí.
+        echo "La creación del mantenimiento falló críticamente." >&2
         exit 1
-    else
-        echo "Mantenimiento creado exitosamente:"
-        echo "$rsp_msg"
-        # Opcional: enviar resultado a Zabbix (requiere item_id y sector)
-        local HOST_LOG="Registros de Mantenimientos"
-        local KEY_SECTOR="mantenimientos.${SECTOR_DEFAULT_IF_ANY}" # Deberías pasar el sector o tener uno por defecto si aplica
-        local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
-        send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "create_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
     fi
 
     # Display opcional o requerido después de create (si se especificó un sector)
@@ -789,32 +865,13 @@ cmd_update() {
     # Construimos el JSON de entrada para el handler, incluyendo la acción
     local action_json
     action_json=$(build_input_json_for_action "update")
-    #echo "->${action_json}<-" ###DEBUG
 
-    # Llamamos al handler JavaScript con el nuevo JSON
-    local rsp_msg
-    rsp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$action_json")
-    local exit_code=$?
-
-    if [ $exit_code -ne 0 ] || echo "$rsp_msg" | grep -q "error\|Problema"; then
-        echo "Error: Falló la actualización del mantenimiento." >&2
-        echo "$rsp_msg" >&2
+    # Pasamos "update", el JSON, y el sector
+    if ! execute_action_and_report "update" "$action_json" "$UPDATE_SECTOR"; then
+        # Si execute_action_and_report falla (retorno != 0), es porque hubo un error crítico en la ejecución del handler
+        # y ya se reportó. Podemos salir del script aquí.
+        echo "La actualización del mantenimiento falló críticamente." >&2
         exit 1
-    else
-        echo "Mantenimiento actualizado exitosamente:"
-        echo "$rsp_msg"
-        # Opcional: enviar resultado a Zabbix (esto podría repetirse con display)
-        # Similar al create, necesitas el item_id y el sector.
-        if [[ -n "$UPDATE_SECTOR" ]]; then
-            local HOST_LOG="Registros de Mantenimientos"
-            local KEY_SECTOR="mantenimientos.${UPDATE_SECTOR}"
-            local item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
-            if [[ -n "$item_id" ]]; then
-                send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "update_maintenance" "success" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
-            else
-                echo "Advertencia: No se pudo obtener el itemid para registrar el resultado." >&2
-            fi
-        fi
     fi
 
     # Display opcional o requerido después de update (similar a como estaba antes)
