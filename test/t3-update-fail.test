@@ -1,0 +1,9 @@
+#!/bin/bash
+# Ejemplo de comando update que falla (mantenimiento no encontrado). Reporta el fallo al sector test
+# Asegurarse de que el nombre "[Web Mantenimientos] NombreQueNoExiste" NO exista en Zabbix
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    update \
+    --name "[Web Mantenimientos] NombreQueNoExiste" \
+    --startdate "2026-01-02 10:00:00" \
+    --period 15d \
+    --sector "test"

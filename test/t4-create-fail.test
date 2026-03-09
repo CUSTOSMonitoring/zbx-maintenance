@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ejemplo de comando create que falla (hostque se quere poner en mantenimiento no existe). Reporta el fallo al sector test
+# Asegurarse de que no exista un host con el nombre UnHostQueNoExiste en Zabbix
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    create \
+    --name "Mantenimiento de Prueba desde MaintenanceHandler: v21" \
+    --active-since "2026-01-01 00:00:00" \
+    --active-till "2027-01-01 00:00:00" \
+    --period 30d \
+    --hostnames "UnHostQueNoExiste" \
+    --sector "test"

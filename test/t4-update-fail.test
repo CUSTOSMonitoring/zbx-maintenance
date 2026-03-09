@@ -1,0 +1,7 @@
+#!/bin/bash
+# Ejemplo de comando update que falla (hosts a agregar al mantenimiento no encontrados). Reporta el fallo al sector test
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    update \
+    --name "[Web Mantenimientos] Mantenimiento de Prueba desde MaintenanceHandler: v1" \
+    --hostnames "Un host que no existe, Otro host que no existe" \
+    --sector "test"

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ejemplo de comando create que falla (nombre duplicado). Reporta el fallo al sector test
+# Asegurarse de que el nombre "[Web Mantenimientos] Mantenimiento de Prueba desde MaintenanceHandler: v1" ya exista en Zabbix
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    create \
+    --name "Mantenimiento de Prueba desde MaintenanceHandler: v1" \
+    --active-since "2026-01-01 00:00:00" \
+    --active-till "2027-01-01 00:00:00" \
+    --period 30d \
+    --hostnames "host test" \
+    --sector "test"
