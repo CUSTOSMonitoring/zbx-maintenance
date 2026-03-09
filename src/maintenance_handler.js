@@ -288,82 +288,17 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
 
         // Enviamos la solicitud
         var response = req.get(url, JSON.stringify(jdata));
-        var parsed_response = JSON.parse(response);
 
-        if (parsed_response.error) {
-            return { "error": "Error de la API de Zabbix en upd_maintenance: " + JSON.stringify(parsed_response.error) };
+        // Intentamos parsear la respuesta
+        var parsedResponse = JSON.parse(response);
+
+        // Verificar si la API devolvió un error
+        if (parsedResponse.error) {
+            var errorMessage = parsedResponse.error.data || parsedResponse.error.message || "Error desconocido de la API de Zabbix.";
+            return { "error": "Error de la API de Zabbix en update_maintenance: " + errorMessage };
         }
 
-        return parsed_response.result;
-    } catch (error) {
-        return { "error": "Problema al actualizar el mantenimiento: " + error };
-    }
-}
-
-// Actualizamos un mantenimiento existente en Zabbix
-function upd_maintenance_old(url, token, maintenance_id, timeperiod_startdate, timeperiod_period, hostids, groupids) {
-    // Validación: maintenance_id debe ser un valor válido (no null, undefined, vacío)
-    if (maintenance_id == null || maintenance_id === "") {
-        return null;
-    }
-
-    // Validación: timeperiod_period debe ser un número positivo
-    if (typeof timeperiod_period !== 'number' || timeperiod_period <= 0) {
-        return null;
-    }
-
-    // Validación: hostids y groupids deben ser un array
-    // Importante: Si le llega un array vacio, estamos indicando que vamos a quitar los hosts o los grupos del mantenimiento dependiendo del array
-    var hasHosts = Array.isArray(hostids) //&& hostids.length > 0;
-    var hasGroups = Array.isArray(groupids) //&& groupids.length > 0;
-
-    // Usamos timeperiod_startdate si está especificado, sino usamos NOW
-    if (
-        timeperiod_startdate != null &&
-        !isNaN(timeperiod_startdate)
-    ) {
-        start_date = Math.floor(timeperiod_startdate);
-    } else {
-        start_date = Math.floor(Date.now() / 1000);
-    }
-
-
-    try {
-        req = new HttpRequest();
-        req.addHeader('Content-Type: application/json');
-        req.addHeader('Authorization: Bearer ' + token);
-
-        // Construimos el cuerpo de la solicitud
-        jdata = {
-            "jsonrpc": "2.0",
-            "method": "maintenance.update",
-            "params": {
-                "maintenanceid": maintenance_id,
-                "timeperiods": [
-                    {
-                        "start_date": start_date,
-                        "period": timeperiod_period
-                    }
-                ]
-            },
-            "id": 1
-        };
-
-        // Solo agregamos hosts si se proporcionaron
-        if (hasHosts) {
-            jdata.params.hosts = hostids;
-        }
-
-        // Solo agregamos groups si se proporcionaron
-        if (hasGroups) {
-            jdata.params.groups = groupids;
-        }
-
-        // Enviamos la solicitud
-        var response = req.get(url, JSON.stringify(jdata));
-        var maintenanceids_arr = JSON.parse(response).result;
-
-        return maintenanceids_arr;
+        return parsedResponse.result;
 
     } catch (error) {
         return { "error": "Problema al actualizar el mantenimiento: " + error };
@@ -439,7 +374,7 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
         // Verificar si la API devolvió un error
         if (parsedResponse.error) {
             var errorMessage = parsedResponse.error.data || parsedResponse.error.message || "Error desconocido de la API de Zabbix.";
-            return { "error": "Error de la API Zabbix en create_maintenance: " + errorMessage };
+            return { "error": "Error de la API de Zabbix en create_maintenance: " + errorMessage };
         }
 
         // Devolver el resultado exitoso
@@ -495,8 +430,10 @@ function list_maintenances(url, token, maintenance_prefix) {
 
         // Verificar si la API devolvió un error
         if (parsedResponse.error) {
-            return { "error": "Error de la API de Zabbix en list_maintenances: " + JSON.stringify(parsedResponse.error) };
+            var errorMessage = parsedResponse.error.data || parsedResponse.error.message || "Error desconocido de la API de Zabbix.";
+            return { "error": "Error de la API de Zabbix en list_maintenance: " + errorMessage };
         }
+
 
         // Devolver la lista de mantenimientos encontrados
         // Si no hay coincidencias, la API devuelve un array vacío []
