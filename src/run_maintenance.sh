@@ -627,8 +627,8 @@ Crea un nuevo mantenimiento en Zabbix.
 
 Opciones:
     -n, --name NAME                 Nombre del nuevo mantenimiento (requerido).
-    --active-since TIMESTAMP        Timestamp Unix de inicio del mantenimiento (requerido).
-    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento (requerido).
+    --active-since TIMESTAMP        Timestamp Unix de inicio del mantenimiento. Por defecto, ahora.
+    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento. Por defecto, ahora + 3 años
     --type TYPE                     Tipo de mantenimiento (0: Normal, 1: No Data). Por defecto 0.
     --period PERIOD                 Duración del período de mantenimiento (ej: 2h, 1d). Requerido.
     --startdate STARTDATE           Fecha/hora de inicio del primer período (timestamp o formato yyyy-mm-dd hh:mm:ss). Por defecto, ahora.
@@ -639,8 +639,6 @@ Opciones:
 Ejemplo:
     ./run_maintenance.sh create \
         --name "Mantenimiento de Prueba" \
-        --active-since 1704067200 \
-        --active-till 1704153600 \
         --period 2h \
         --hostnames "Serv1, Serv2"
 EOF
@@ -707,10 +705,10 @@ cmd_create() {
                 CREATE_NAME="$2"; shift 2 ;;
             --active-since)
                 if [[ -z "$2" ]]; then echo "Error: --active-since requiere un valor." >&2; exit 1; fi
-                CREATE_ACTIVE_SINCE="$2"; shift 2 ;;
+                CREATE_ACTIVE_SINCE_RAW="$2"; shift 2 ;; # Almacenamos el valor raw
             --active-till)
                 if [[ -z "$2" ]]; then echo "Error: --active-till requiere un valor." >&2; exit 1; fi
-                CREATE_ACTIVE_TILL="$2"; shift 2 ;;
+                CREATE_ACTIVE_TILL_RAW="$2"; shift 2 ;; # Almacenamos el valor raw
             --type)
                 if [[ -z "$2" ]]; then echo "Error: --type requiere un valor." >&2; exit 1; fi
                 CREATE_TYPE="$2"; shift 2 ;;
@@ -736,13 +734,42 @@ cmd_create() {
         esac
     done
 
+    # --- Aplicar valores por defecto ---
+    # Si --active-since no fue especificado, usamos el valor calculado por defecto (timestamp numérico)
+    if [[ -z "$CREATE_ACTIVE_SINCE_RAW" ]]; then
+        CREATE_ACTIVE_SINCE_PARSED="$ACTIVE_SINCE_DEFAULT_TS"
+    else
+        # Si fue especificado, lo parseamos (puede ser timestamp numérico o cadena datetime)
+        # Primero intentamos interpretarlo como número (timestamp)
+        if [[ "$CREATE_ACTIVE_SINCE_RAW" =~ ^[0-9]+$ ]]; then
+            CREATE_ACTIVE_SINCE_PARSED="$CREATE_ACTIVE_SINCE_RAW"
+        else
+            # Si no es número, asumimos que es una cadena datetime y la parseamos
+            CREATE_ACTIVE_SINCE_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_SINCE_RAW") || exit 1
+        fi
+    fi
+
+    # Si --active-till no fue especificado, usamos el valor calculado por defectoo)
+    if [[ -z "$CREATE_ACTIVE_TILL_RAW" ]]; then
+        CREATE_ACTIVE_TILL_PARSED="$ACTIVE_TILL_DEFAULT_TS"
+    else
+        # Si fue especificado, lo parseamos (puede ser timestamp numérico o cadena datetime)
+        # Primero intentamos interpretarlo como número (timestamp)
+        if [[ "$CREATE_ACTIVE_TILL_RAW" =~ ^[0-9]+$ ]]; then
+            CREATE_ACTIVE_TILL_PARSED="$CREATE_ACTIVE_TILL_RAW"
+        else
+            # Si no es número, asumimos que es una cadena datetime y la parseamos
+            CREATE_ACTIVE_TILL_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_TILL_RAW") || exit 1
+        fi
+    fi
+    # --- Fin aplicación de valores por defecto ---
+
     # Validación de parámetros requeridos para create
-    if [[ -z "$CREATE_NAME" || -z "$CREATE_ACTIVE_SINCE" || -z "$CREATE_ACTIVE_TILL" || -z "$CREATE_PERIOD" ]]; then
-        echo "Error: Parámetros requeridos faltantes para create." >&2
+    if [[ -z "$CREATE_NAME" || -z "$CREATE_PERIOD" ]]; then
+        echo "Error: Parámetros requeridos faltantes para create: --name, --period." >&2
         show_help_create
         exit 1
     fi
-
 
     # Agregamos un prefijo al nombre del mantenimiento gestionado por este proyecto
     if [[ -n "$CREATE_NAME" ]]; then
@@ -750,8 +777,6 @@ cmd_create() {
     fi
 
     # Parseo de valores (timestamps, periodos)
-    CREATE_ACTIVE_SINCE_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_SINCE") || exit 1
-    CREATE_ACTIVE_TILL_PARSED=$(parse_datetime_to_timestamp "$CREATE_ACTIVE_TILL") || exit 1
     CREATE_PERIOD_SECONDS=$(parse_time_to_seconds "$CREATE_PERIOD") || exit 1
     if [[ -n "$CREATE_STARTDATE" ]]; then
         CREATE_STARTDATE_PARSED=$(parse_datetime_to_timestamp "$CREATE_STARTDATE") || exit 1
@@ -977,6 +1002,10 @@ cmd_list() {
 
 #set -e ##DEBUG
 #set -u ##DEBUG
+
+# Calcular valores por defecto para active_since y active_till
+ACTIVE_SINCE_DEFAULT_TS=$(date +%s) # NOW en timestamp Unix
+ACTIVE_TILL_DEFAULT_TS=$(( ACTIVE_SINCE_DEFAULT_TS + 3 * 365 * 24 * 3600 )) # NOW + 3 years
 
 # Validar dependencias
 command -v zabbix_js >/dev/null 2>&1 || { echo "Error: zabbix_js no encontrado." >&2; exit 1; }
