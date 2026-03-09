@@ -242,7 +242,6 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
             "id": 1
         };
 
-        // --- LOGICA ORIGINAL PARA TIMEPERIODS ---
         // Solo actualizamos timeperiods si se especificaron nuevos valores
         if ((timeperiod_startdate !== null && typeof timeperiod_startdate !== 'undefined') || (timeperiod_period !== null && typeof timeperiod_period !== 'undefined')) {
             // Se asume que se quiere actualizar el primer (y único) timeperiod existente
@@ -261,9 +260,7 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
                 "period": period
             }];
         }
-        // --- FIN LOGICA ORIGINAL ---
 
-        // --- LOGICA ORIGINAL PARA HOSTS Y GROUPS ---
         // Solo agregamos hosts si se proporcionaron explícitamente (puede ser [])
         if (hostids !== null) {
             jdata.params.hosts = hostids;
@@ -273,7 +270,6 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
         if (groupids !== null) {
             jdata.params.groups = groupids;
         }
-        // --- FIN LOGICA ORIGINAL ---
 
         // --- NUEVA LOGICA PARA active_since, active_till, maintenance_type ---
         // Solo actualizamos estos campos si se especificaron nuevos valores
@@ -295,7 +291,7 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
         var parsed_response = JSON.parse(response);
 
         if (parsed_response.error) {
-            return { "error": "API Error: " + JSON.stringify(parsed_response.error) };
+            return { "error": "Error de la API de Zabbix en upd_maintenance: " + JSON.stringify(parsed_response.error) };
         }
 
         return parsed_response.result;
@@ -442,14 +438,16 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
 
         // Verificar si la API devolvió un error
         if (parsedResponse.error) {
-            return "Error de la API Zabbix en create_maintenance: " + JSON.stringify(parsedResponse.error);
+            var errorMessage = parsedResponse.error.data || parsedResponse.error.message || "Error desconocido de la API de Zabbix.";
+            return { "error": "Error de la API Zabbix en create_maintenance: " + errorMessage };
         }
 
         // Devolver el resultado exitoso
         return parsedResponse.result;
 
     } catch (error) {
-        return "Error al crear el mantenimiento: " + error;
+        return { "error": "Error al crear el mantenimiento: " + error };
+
     }
 }
 
@@ -497,7 +495,7 @@ function list_maintenances(url, token, maintenance_prefix) {
 
         // Verificar si la API devolvió un error
         if (parsedResponse.error) {
-            return { "error": "Error de la API Zabbix en list_maintenances: " + JSON.stringify(parsedResponse.error) };
+            return { "error": "Error de la API de Zabbix en list_maintenances: " + JSON.stringify(parsedResponse.error) };
         }
 
         // Devolver la lista de mantenimientos encontrados
@@ -606,7 +604,7 @@ try {
                  );
             }
             break;
-        case 'update_OLD':
+        case 'update_OLD': //DEBUG
             // Parsear nombres de hosts y grupos
             var hostnames_arr = parse_names(input.hostnames || "");
             var groupnames_arr = parse_names(input.groupnames || "");
