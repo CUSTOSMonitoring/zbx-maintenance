@@ -417,8 +417,13 @@ function list_maintenances(url, token, maintenance_prefix) {
                 },
                 // Usamos 'startSearch' para que coincida solo al inicio del nombre
                 "startSearch": true,
-                // Solicitamos solo las propiedades requeridas
-                "output": ["maintenanceid", "name"]
+                //Version anterior ->// Solicitamos solo las propiedades requeridas
+                //"output": ["maintenanceid", "name"]
+                // Solicitamos todas las propiedades extendidas y relaciones
+                "output": "extend", // Esto incluye maintenanceid, name, maintenance_type, description, active_since, active_till
+                "selectTimeperiods": "extend", // Incluye los períodos de tiempo
+                "selectHosts": ["hostid", "name"], // Incluye hosts asociados (solo id y nombre)
+                "selectHostGroups": ["groupid", "name"] // Incluye grupos de hosts asociados (solo id y nombre)
             },
             "id": 1
         };

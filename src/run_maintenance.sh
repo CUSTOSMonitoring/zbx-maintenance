@@ -987,7 +987,8 @@ cmd_list() {
         exit 1
     else
         echo "Mantenimientos encontrados:"
-        echo "$rsp_msg" | jq -r '.[] | "ID: \(.maintenanceid) - Name: \(.name)"' # Formatear salida si es un array
+        echo "$rsp_msg" | jq '.' # Usamos jq '.' para formatear bonito el JSON
+        ###Formateo que ya no usamos->echo "$rsp_msg" | jq -r '.[] | "ID: \(.maintenanceid) - Name: \(.name)"' # Formatear salida si es un array
         # Opcional: enviar resultado a Zabbix (requiere item_id y sector si aplica)
         # local HOST_LOG="Registros de Mantenimientos"
         # local KEY_SECTOR="mantenimientos.list" # O usar el sector si aplica
