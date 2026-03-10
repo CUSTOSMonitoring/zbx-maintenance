@@ -546,45 +546,6 @@ try {
                  );
             }
             break;
-        case 'update_OLD': //DEBUG
-            // Parsear nombres de hosts y grupos
-            var hostnames_arr = parse_names(input.hostnames || "");
-            var groupnames_arr = parse_names(input.groupnames || "");
-
-            // Obtener IDs de hosts y grupos
-            var hostObjects = get_host_id(url, token, hostnames_arr);
-            var groupObjects = get_group_id(url, token, groupnames_arr);
-
-            // Extraer solo los IDs numéricos como objetos {hostid: "..."} o {groupid: "..."}
-            var hostIds = (hostObjects && Array.isArray(hostObjects)) ? extractIds(hostObjects, "hostid").map(function(id) { return {"hostid": id}; }) : [];
-            var groupIds = (groupObjects && Array.isArray(groupObjects)) ? extractIds(groupObjects, "groupid").map(function(id) { return {"groupid": id}; }) : [];
-
-            // Obtener ID del mantenimiento a actualizar
-            var maintenanceDetails = get_maintenance_id(url, token, maintenanceName);
-            var maintenanceId = null;
-            if (Array.isArray(maintenanceDetails) && maintenanceDetails.length > 0) {
-                maintenanceId = extractIds(maintenanceDetails, "maintenanceid")[0];
-            }
-
-            if (!maintenanceId) {
-                 result = {"error": "Mantenimiento no encontrado para actualizar: " + maintenanceName};
-            } else if (hostObjects && hostObjects.error) {
-                 result = hostObjects; // Devuelve el objeto de error
-            } else if (groupObjects && groupObjects.error) {
-                 result = groupObjects; // Devuelve el objeto de error
-            } else {
-                 // Llamar a upd_maintenance con los IDs extraídos
-                 result = upd_maintenance(
-                     url,
-                     token,
-                     maintenanceId,
-                     input.timeperiod_startdate,
-                     input.timeperiod_period,
-                     hostIds, // Pasar array de {hostid: "..."}
-                     groupIds // Pasar array de {groupid: "..."}
-                 );
-            }
-            break;
         case 'display':
             // Lógica para display (ejemplo, usando la función existente)
             var maintenanceDetails = get_maintenance_id(url, token, maintenanceName);
