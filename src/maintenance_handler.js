@@ -193,8 +193,8 @@ function format_display(maintenance_info) {
 }
 
 // Actualizamos un mantenimiento existente en Zabbix
-// Ahora puede actualizar timeperiods, hosts, groups, active_since, active_till, y maintenance_type
-function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timeperiod_period, hostids, groupids, active_since, active_till, maint_type) {
+// Ahora puede actualizar timeperiods, hosts, groups, active_since, active_till, maintenance_type y description
+function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timeperiod_period, hostids, groupids, active_since, active_till, maint_type, new_description) {
     // Validación: maintenance_id debe ser un valor válido (no null, undefined, vacío)
     if (maintenance_id == null || maintenance_id === "") {
         return { "error": "ID de mantenimiento inválida para actualizar." };
@@ -284,6 +284,11 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
         if (maint_type !== null && typeof maint_type !== 'undefined') {
             jdata.params.maintenance_type = maint_type;
         }
+
+        // Solo actualizamos la descripción si se especificó un nuevo valor
+        if (new_description !== null && typeof new_description !== 'undefined') {
+            jdata.params.description = new_description;
+        }
         // --- FIN NUEVA LOGICA ---
 
         // Enviamos la solicitud
@@ -319,9 +324,11 @@ function upd_maintenance(url, token, maintenance_id, timeperiod_startdate, timep
  * @param {number} timeperiod_period - Duración del período en segundos.
  * @param {Array|null} hostids - Array de objetos hostid: [{"hostid": "1"}, ...] o null.
  * @param {Array|null} groupids - Array de objetos groupid: [{"groupid": "2"}, ...] o null.
+ * @param {string} maintenance_description - Descripción del mantenimiento (opcional).
  * @returns {Object|string} - Resultado de la API o mensaje de error.
  */
-function create_maintenance(url, token, maintenance_name, maintenance_active_since, maintenance_active_till, maintenance_type, timeperiod_startdate, timeperiod_period, hostids, groupids) {
+function create_maintenance(url, token, maintenance_name, maintenance_active_since, maintenance_active_till, maintenance_type, timeperiod_startdate, timeperiod_period, hostids, groupids, maintenance_description) {
+
     // Validación básica de parámetros requeridos
     if (!url || !token || !maintenance_name || typeof maintenance_active_since !== 'number' || typeof maintenance_active_till !== 'number' || typeof timeperiod_startdate !== 'number' || typeof timeperiod_period !== 'number') {
         return "Error: Parámetros inválidos para create_maintenance.";
@@ -330,6 +337,11 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
     // Asegurar valores por defecto
     if (typeof maintenance_type === 'undefined' || maintenance_type === null) {
         maintenance_type = 0; // With data collection
+    }
+
+    // Asegurar una descripción vacía si no se proporciona
+    if (typeof maintenance_description === 'undefined' || maintenance_description === null) {
+        maintenance_description = ""; // Cadena vacía por defecto
     }
 
     try {
@@ -356,6 +368,7 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
             "id": 1
         };
 
+
         // Agregar hosts si se proveen
         if (hostids && Array.isArray(hostids) && hostids.length > 0) {
             jdata.params.hosts = hostids;
@@ -364,6 +377,10 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
         // Agregar grupos si se proveen
         if (groupids && Array.isArray(groupids) && groupids.length > 0) {
             jdata.params.groups = groupids;
+        }
+
+        if (maintenance_description !== null && typeof maintenance_description !== 'undefined') {
+            jdata.params.description = maintenance_description;
         }
 
         var response = req.get(url, JSON.stringify(jdata));
@@ -455,7 +472,7 @@ function list_maintenances(url, token, maintenance_prefix) {
 try {
     var input = JSON.parse(value);
 
-    var action = input.action; // <-- Campo clave del nuevo flujo
+    var action = input.action;
     var url = input.zbx_url;
     var token = input.zbx_apitoken;
     var maintenanceName = input.maintenance_name;
@@ -493,7 +510,8 @@ try {
                      input.timeperiod_startdate,
                      input.timeperiod_period,
                      hostIds, // Pasar array de {hostid: "..."}
-                     groupIds // Pasar array de {groupid: "..."}
+                     groupIds, // Pasar array de {groupid: "..."}
+                     input.maintenance_description
                  );
             }
             break;
@@ -530,6 +548,8 @@ try {
                  var activeSince = input.maintenance_active_since; // Debe ser un número (timestamp) o undefined/null
                  var activeTill = input.maintenance_active_till;   // Debe ser un número (timestamp) o undefined/null
                  var maintType = input.maintenance_type;         // Debe ser 0 o 1 o undefined/null
+                 var newDescription = input.maintenance_description; // Puede ser una cadena o undefined/null
+
 
                  // Llamar a upd_maintenance con los IDs extraídos y los nuevos parámetros
                  result = upd_maintenance(
@@ -542,7 +562,8 @@ try {
                      groupIds,                   // Puede ser null
                      activeSince,                // Puede ser null/undefined
                      activeTill,                 // Puede ser null/undefined
-                     maintType                   // Puede ser null/undefined
+                     maintType,                  // Puede ser null/undefined
+                     newDescription              // Puede ser null/undefined
                  );
             }
             break;

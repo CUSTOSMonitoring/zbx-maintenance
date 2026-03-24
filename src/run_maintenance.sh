@@ -38,6 +38,7 @@ CREATE_PERIOD=""
 CREATE_STARTDATE=""
 CREATE_HOSTNAMES=""
 CREATE_GROUPNAMES=""
+CREATE_DESCRIPTION=""
 CREATE_SECTOR="" # Necesario para el registro en Zabbix
 # UPDATE
 UPDATE_NAME=""
@@ -48,6 +49,7 @@ UPDATE_ACTIVE_TILL=""
 UPDATE_TYPE=""
 UPDATE_HOSTNAMES=""
 UPDATE_GROUPNAMES=""
+UPDATE_DESCRIPTION=""
 UPDATE_SECTOR="" # Necesario para el registro en Zabbix
 # DELETE
 DELETE_NAME=""
@@ -386,72 +388,141 @@ send_result() {
 build_input_json_for_action() {
     local action="$1"
     # Se esperan más parámetros según la acción
-    # Este es un ejemplo genérico, se puede especializar por acción
     # Usamos variables globales definidas en cada cmd_*
     case "$action" in
         create)
             # Usar las variables CREATE_*
-            jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" \
-               --arg name "$CREATE_NAME" --argjson since "$CREATE_ACTIVE_SINCE_PARSED" --argjson till "$CREATE_ACTIVE_TILL_PARSED" \
-               --argjson type "$CREATE_TYPE" --argjson start_date "$CREATE_STARTDATE_PARSED" --argjson period "$CREATE_PERIOD_SECONDS" \
-               --arg hostnames "$CREATE_HOSTNAMES" --arg groupnames "$CREATE_GROUPNAMES" \
-               '{
-                   zbx_url: $url,
-                   zbx_apitoken: $token,
-                   action: $act,
-                   maintenance_name: $name,
-                   maintenance_active_since: $since,
-                   maintenance_active_till: $till,
-                   maintenance_type: $type,
-                   timeperiod_startdate: $start_date,
-                   timeperiod_period: $period,
-                   hostnames: $hostnames,
-                   groupnames: $groupnames
-               }'
-            ;;
-        update)
-            # Usar las variables UPDATE_*
             # Inicializamos variables para el JSON con valores vacíos o nulos si no se definieron
             local period_json="null"
             local startdate_json="null"
             local since_json="null"
             local till_json="null"
             local type_json="null"
-            local sector_json="null"
+            # NO inicializamos desc_json con "null"
 
             # Solo incluimos en el JSON los valores que fueron realmente especificados
-            if [[ -n "$UPDATE_PERIOD_SECONDS" ]]; then period_json="$UPDATE_PERIOD_SECONDS"; fi
-            if [[ -n "$UPDATE_STARTDATE_PARSED" ]]; then startdate_json="$UPDATE_STARTDATE_PARSED"; fi
-            if [[ -n "$UPDATE_ACTIVE_SINCE_PARSED" ]]; then since_json="$UPDATE_ACTIVE_SINCE_PARSED"; fi # <--- NUEVO
-            if [[ -n "$UPDATE_ACTIVE_TILL_PARSED" ]]; then till_json="$UPDATE_ACTIVE_TILL_PARSED"; fi   # <--- NUEVO
-            if [[ -n "$UPDATE_TYPE" ]]; then type_json="$UPDATE_TYPE"; fi                             # <--- NUEVO
-            if [[ -n "$UPDATE_SECTOR" ]]; then sector_json="$UPDATE_SECTOR"; fi                       # <--- Para display
+            if [[ -n "$CREATE_PERIOD_SECONDS" ]]; then period_json="$CREATE_PERIOD_SECONDS"; fi
+            if [[ -n "$CREATE_STARTDATE_PARSED" ]]; then startdate_json="$CREATE_STARTDATE_PARSED"; fi
+            if [[ -n "$CREATE_ACTIVE_SINCE_PARSED" ]]; then since_json="$CREATE_ACTIVE_SINCE_PARSED"; fi
+            if [[ -n "$CREATE_ACTIVE_TILL_PARSED" ]]; then till_json="$CREATE_ACTIVE_TILL_PARSED"; fi
+            if [[ -n "$CREATE_TYPE" ]]; then type_json="$CREATE_TYPE"; fi
+            # No procesamos CREATE_DESCRIPTION aquí directamente en las variables
 
-            jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" \
-               --arg name "$UPDATE_NAME" \
-               --argjson period_val "$period_json" \
-               --argjson start_date_val "$startdate_json" \
-               --argjson since_val "$since_json" \
-               --argjson till_val "$till_json" \
-               --argjson type_val "$type_json" \
-               --arg hostnames "$UPDATE_HOSTNAMES" --arg groupnames "$UPDATE_GROUPNAMES" \
-               --arg sector_val "$sector_json" \
-               '{
-                   zbx_url: $url,
-                   zbx_apitoken: $token,
-                   action: $act,
-                   maintenance_name: $name,
-                   timeperiod_period: $period_val,
-                   timeperiod_startdate: $start_date_val,
-                   maintenance_active_since: $since_val, # <--- NUEVO
-                   maintenance_active_till: $till_val,   # <--- NUEVO
-                   maintenance_type: $type_val,          # <--- NUEVO
-                   hostnames: $hostnames,
-                   groupnames: $groupnames,
-                   sector: $sector_val
-               }'
+            # Construimos el objeto JSON condicionalmente
+            # Usamos --arg para cada valor que sí tiene
+            local jq_args=(--arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "$action" --arg name "$CREATE_NAME")
+            jq_args+=(--argjson since_val "$since_json" --argjson till_val "$till_json" --argjson type_val "$type_json")
+            jq_args+=(--argjson period_val "$period_json" --argjson start_date_val "$startdate_json")
+            jq_args+=(--arg hostnames "$CREATE_HOSTNAMES" --arg groupnames "$CREATE_GROUPNAMES")
+
+            # Añadimos --arg para description solo si CREATE_DESCRIPTION no está vacío
+            if [[ -n "$CREATE_DESCRIPTION" ]]; then
+                jq_args+=(--arg desc_val "$CREATE_DESCRIPTION") # Pasamos la cadena sin procesar
+                # Construimos el objeto JSON incluyendo description
+                jq -n "${jq_args[@]}" '
+                    {
+                        zbx_url: $url,
+                        zbx_apitoken: $token,
+                        action: $act,
+                        maintenance_name: $name,
+                        maintenance_active_since: $since_val,
+                        maintenance_active_till: $till_val,
+                        maintenance_type: $type_val,
+                        timeperiod_period: $period_val,
+                        timeperiod_startdate: $start_date_val,
+                        maintenance_description: $desc_val,
+                        hostnames: $hostnames,
+                        groupnames: $groupnames
+                    }'
+            else
+                # Construimos el objeto JSON SIN el campo description
+                jq -n "${jq_args[@]}" '
+                    {
+                        zbx_url: $url,
+                        zbx_apitoken: $token,
+                        action: $act,
+                        maintenance_name: $name,
+                        maintenance_active_since: $since_val,
+                        maintenance_active_till: $till_val,
+                        maintenance_type: $type_val,
+                        timeperiod_period: $period_val,
+                        timeperiod_startdate: $start_date_val,
+                        hostnames: $hostnames,
+                        groupnames: $groupnames
+                    }'
+            fi
             ;;
+        update)
+            # Argumentos base que SIEMPRE van
+            local jq_args=(
+                --arg url "$ZBX_URL"
+                --arg token "$ZBX_APITOKEN"
+                --arg act "$action"
+                --arg name "$UPDATE_NAME"
+                --arg hostnames "$UPDATE_HOSTNAMES"
+                --arg groupnames "$UPDATE_GROUPNAMES"
+                --arg sector_val "$UPDATE_SECTOR"
+            )
 
+            # Campos que PUEDEN ir: SIEMPRE los pasamos, con null si no tienen valor
+            if [[ -n "$UPDATE_PERIOD_SECONDS" ]]; then
+                jq_args+=(--argjson period_val "$UPDATE_PERIOD_SECONDS")
+            else
+                jq_args+=(--argjson period_val null)
+            fi
+            if [[ -n "$UPDATE_STARTDATE_PARSED" ]]; then
+                jq_args+=(--argjson start_date_val "$UPDATE_STARTDATE_PARSED")
+            else
+                jq_args+=(--argjson start_date_val null)
+            fi
+            if [[ -n "$UPDATE_ACTIVE_SINCE_PARSED" ]]; then
+                jq_args+=(--argjson since_val "$UPDATE_ACTIVE_SINCE_PARSED")
+            else
+                jq_args+=(--argjson since_val null)
+            fi
+            if [[ -n "$UPDATE_ACTIVE_TILL_PARSED" ]]; then
+                jq_args+=(--argjson till_val "$UPDATE_ACTIVE_TILL_PARSED")
+            else
+                jq_args+=(--argjson till_val null)
+            fi
+            if [[ -n "$UPDATE_TYPE" ]]; then
+                jq_args+=(--argjson type_val "$UPDATE_TYPE")
+            else
+                jq_args+=(--argjson type_val null)
+            fi
+            # IMPORTANTE: Para description, usar --argjson con null, NO --arg con "null"
+            if [[ -n "$UPDATE_DESCRIPTION" ]]; then
+                jq_args+=(--arg desc_val "$UPDATE_DESCRIPTION")
+            else
+                jq_args+=(--argjson desc_val null)  # <-- JSON null, no string "null"
+            fi
+
+            # Filtro de jq: objeto base + campos opcionales condicionales
+            local jq_filter='
+            {
+                zbx_url: $url,
+                zbx_apitoken: $token,
+                action: $act,
+                maintenance_name: $name,
+                timeperiod_period: $period_val,
+                timeperiod_startdate: $start_date_val,
+                hostnames: $hostnames,
+                groupnames: $groupnames,
+                sector: $sector_val
+            }
+            | . as $base
+            | [
+                if $since_val != null then {maintenance_active_since: $since_val} else {} end,
+                if $till_val != null then {maintenance_active_till: $till_val} else {} end,
+                if $type_val != null then {maintenance_type: $type_val} else {} end,
+                if $desc_val != null then {maintenance_description: $desc_val} else {} end
+            ]
+            | add as $optional
+            | $base + $optional
+            '
+
+            jq -n "${jq_args[@]}" "$jq_filter"
+            ;;
         # Otros casos como delete, list...
         *)
             echo '{}' # JSON vacío por defecto si la acción no está implementada
@@ -628,10 +699,11 @@ Crea un nuevo mantenimiento en Zabbix.
 Opciones:
     -n, --name NAME                 Nombre del nuevo mantenimiento (requerido).
     --active-since TIMESTAMP        Timestamp Unix de inicio del mantenimiento. Por defecto, ahora.
-    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento. Por defecto, ahora + 3 años
+    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento. Por defecto, ahora + 3 años.
     --type TYPE                     Tipo de mantenimiento (0: Normal, 1: No Data). Por defecto 0.
     --period PERIOD                 Duración del período de mantenimiento (ej: 2h, 1d). Requerido.
     --startdate STARTDATE           Fecha/hora de inicio del primer período (timestamp o formato yyyy-mm-dd hh:mm:ss). Por defecto, ahora.
+    --description TEXT              Descripción del mantenimiento (opcional).
     -H, --hostnames LIST            Lista de hosts separados por comas.
     -G, --groupnames LIST           Lista de grupos separados por comas.
     -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
@@ -640,7 +712,9 @@ Ejemplo:
     ./run_maintenance.sh create \
         --name "Mantenimiento de Prueba" \
         --period 2h \
-        --hostnames "Serv1, Serv2"
+        --description "Mantenimiento programado para el grupo de Servicios" \
+        --hostnames "Serv1, Serv2" \
+        --sector "Servicios"
 EOF
 }
 
@@ -654,6 +728,10 @@ Opciones:
     -n, --name NAME                 Nombre del mantenimiento a actualizar (requerido).
     --period PERIOD                 Nueva duración del período de mantenimiento (ej: 2h, 1d).
     --startdate STARTDATE           Nueva fecha/hora de inicio del período (timestamp o formato yyyy-mm-dd hh:mm:ss).
+    --active-since TIMESTAMP        Nuevo timestamp Unix de inicio del mantenimiento (opcional).
+    --active-till TIMESTAMP         Nuevo timestamp Unix de fin del mantenimiento (opcional).
+    --type TYPE                     Nuevo tipo de mantenimiento (0: Normal, 1: No Data) (opcional).
+    --description TEXT              Nueva descripción del mantenimiento (opcional).
     -H, --hostnames LIST            Nueva lista de hosts separados por comas.
     -G, --groupnames LIST           Nueva lista de grupos separados por comas.
     -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
@@ -662,7 +740,9 @@ Ejemplo:
     ./run_maintenance.sh update \
         --name "Mantenimiento de Prueba" \
         --period 4h \
-        --hostnames "Serv1, Serv3"
+        --description "Descripción actualizada del mantenimiento" \
+        --hostnames "Serv1, Serv3" \
+        --sector "Servicios"
 EOF
 }
 
@@ -718,6 +798,9 @@ cmd_create() {
             --startdate)
                 if [[ -z "$2" ]]; then echo "Error: --startdate requiere un valor." >&2; exit 1; fi
                 CREATE_STARTDATE="$2"; shift 2 ;;
+            --description)
+                if [[ -z "$2" ]]; then echo "Error: --description requiere un valor." >&2; exit 1; fi
+                CREATE_DESCRIPTION="$2"; shift 2 ;;
             -H|--hostnames)
                 if [[ -z "$2" ]]; then echo "Error: --hostnames requiere un valor." >&2; exit 1; fi
                 CREATE_HOSTNAMES="$2"; shift 2 ;;
@@ -823,22 +906,25 @@ cmd_update() {
             --startdate)
                 if [[ -z "$2" ]]; then echo "Error: --startdate requiere un valor." >&2; exit 1; fi
                 UPDATE_STARTDATE="$2"; shift 2 ;;
-            --active-since) # <--- NUEVO PARSEO
+            --active-since)
                 if [[ -z "$2" ]]; then echo "Error: --active-since requiere un valor." >&2; exit 1; fi
-                UPDATE_ACTIVE_SINCE="$2"; shift 2 ;;
-            --active-till)  # <--- NUEVO PARSEO
+                UPDATE_ACTIVE_SINCE_RAW="$2"; shift 2 ;;
+            --active-till)
                 if [[ -z "$2" ]]; then echo "Error: --active-till requiere un valor." >&2; exit 1; fi
-                UPDATE_ACTIVE_TILL="$2"; shift 2 ;;
-            --type)         # <--- NUEVO PARSEO
+                UPDATE_ACTIVE_TILL_RAW="$2"; shift 2 ;;
+            --type)
                 if [[ -z "$2" ]]; then echo "Error: --type requiere un valor." >&2; exit 1; fi
                 UPDATE_TYPE="$2"; shift 2 ;;
+            --description)
+                if [[ -z "$2" ]]; then echo "Error: --description requiere un valor." >&2; exit 1; fi
+                UPDATE_DESCRIPTION="$2"; shift 2 ;;
             -H|--hostnames)
                 if [[ -z "$2" ]]; then echo "Error: --hostnames requiere un valor." >&2; exit 1; fi
                 UPDATE_HOSTNAMES="$2"; shift 2 ;;
             -G|--groupnames)
                 if [[ -z "$2" ]]; then echo "Error: --groupnames requiere un valor." >&2; exit 1; fi
                 UPDATE_GROUPNAMES="$2"; shift 2 ;;
-            -S|--sector) # Este parámetro es para el registro en Zabbix
+            -S|--sector)
                 if [[ -z "$2" ]]; then echo "Error: --sector requiere un valor." >&2; exit 1; fi
                 UPDATE_SECTOR="$2"; shift 2 ;;
             --help|-h)
@@ -867,18 +953,23 @@ cmd_update() {
     if [[ -n "$UPDATE_STARTDATE" ]]; then
         update_startdate_ts=$(parse_datetime_to_timestamp "$UPDATE_STARTDATE") || exit 1
     else
-        # Si no se especifica startdate, usar timestamp actual (esto era antes)
-        # update_startdate_ts=$(date +%s) # Esto no es necesario aquí si se maneja en el handler
-        # Dejamos la variable vacía si no se definió, el handler lo tomará como "no cambiar"
-        update_startdate_ts=""
+        update_startdate_ts="" # Dejar vacío si no se especificó
     fi
 
-    # Parseo de los nuevos valores (si se proporcionaron) # <--- NUEVO
-    if [[ -n "$UPDATE_ACTIVE_SINCE" ]]; then
-        update_since_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_SINCE") || exit 1
+    # Parseo de active-since y active-till (igual que en create)
+    if [[ -n "$UPDATE_ACTIVE_SINCE_RAW" ]]; then
+        if [[ "$UPDATE_ACTIVE_SINCE_RAW" =~ ^[0-9]+$ ]]; then
+            update_since_ts="$UPDATE_ACTIVE_SINCE_RAW"
+        else
+            update_since_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_SINCE_RAW") || exit 1
+        fi
     fi
-    if [[ -n "$UPDATE_ACTIVE_TILL" ]]; then
-        update_till_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_TILL") || exit 1
+    if [[ -n "$UPDATE_ACTIVE_TILL_RAW" ]]; then
+        if [[ "$UPDATE_ACTIVE_TILL_RAW" =~ ^[0-9]+$ ]]; then
+            update_till_ts="$UPDATE_ACTIVE_TILL_RAW"
+        else
+            update_till_ts=$(parse_datetime_to_timestamp "$UPDATE_ACTIVE_TILL_RAW") || exit 1
+        fi
     fi
 
     # Asignamos a variables globales para el JSON
@@ -893,26 +984,14 @@ cmd_update() {
 
     # Pasamos "update", el JSON, y el sector
     if ! execute_action_and_report "update" "$action_json" "$UPDATE_SECTOR"; then
-        # Si execute_action_and_report falla (retorno != 0), es porque hubo un error crítico en la ejecución del handler
-        # y ya se reportó. Podemos salir del script aquí.
         echo "La actualización del mantenimiento falló críticamente." >&2
         exit 1
     fi
 
-    # Display opcional o requerido después de update (similar a como estaba antes)
-    # Por ahora, lo hacemos siempre si se especificó un sector.
+    # Display opcional o requerido después de update
     if [[ -n "$UPDATE_SECTOR" ]]; then
-        # LLAMAMOS A LA NUEVA FUNCIÓN
         execute_display_and_report "$UPDATE_NAME" "$UPDATE_SECTOR"
-        # Opcional: Puedes manejar el código de retorno si es crítico que display funcione
-        # local disp_ret=$?
-        # if [ $disp_ret -ne 0 ]; then
-        #     echo "Advertencia: El proceso de display finalizó con errores." >&2
-        #     # Decide si es crítico o no
-        #     # exit $disp_ret # Si es crítico
-        # fi
     fi
-
 }
 
 cmd_delete() {
