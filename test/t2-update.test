@@ -4,4 +4,5 @@
     --name "[Web Mantenimientos] Mantenimiento de Prueba desde MaintenanceHandler: v2" \
     --startdate "2026-01-03 14:00:00" \
     --period 12h \
+    --description "Mantenimiento creado ESPECIFICAMENTE para el grupo Pruebas" \
     --sector "test"

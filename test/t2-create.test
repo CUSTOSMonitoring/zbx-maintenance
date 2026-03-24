@@ -6,4 +6,5 @@
     --active-till "2027-01-01 00:00:00" \
     --period 8h \
     --groupnames "Pruebas" \
+    --description "Mantenimiento creado para el grupo Pruebas" \
     --sector "test"
