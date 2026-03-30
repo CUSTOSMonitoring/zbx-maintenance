@@ -403,8 +403,6 @@ function create_maintenance(url, token, maintenance_name, maintenance_active_sin
     }
 }
 
-// --- NUEVAS FUNCIONES ---
-
 /**
  * Obtiene una lista de mantenimientos cuyo nombre comienza con un prefijo específico.
  *
@@ -463,6 +461,55 @@ function list_maintenances(url, token, maintenance_prefix) {
 
     } catch (error) {
         return { "error": "Error al listar los mantenimientos: " + error };
+    }
+}
+
+/**
+ * Elimina uno o más mantenimientos en Zabbix.
+ *
+ * @param {string} url - URL del endpoint de la API de Zabbix.
+ * @param {string} token - Token de API o Session Token.
+ * @param {string|array} maintenance_ids - ID único o array de IDs de los mantenimientos a eliminar.
+ * @returns {Object} - Resultado de la API o objeto de error.
+ */
+function delete_maintenance(url, token, maintenance_ids) {
+    // Validación básica de parámetros requeridos
+    if (!url || !token || !maintenance_ids) {
+        return { "error": "Parámetros inválidos para delete_maintenance." };
+    }
+
+    // Asegurar que maintenance_ids sea un array
+    var ids_to_delete = Array.isArray(maintenance_ids) ? maintenance_ids : [maintenance_ids];
+
+    try {
+        var req = new HttpRequest();
+        req.addHeader('Content-Type: application/json');
+        req.addHeader('Authorization: Bearer ' + token);
+
+        var jdata = {
+            "jsonrpc": "2.0",
+            "method": "maintenance.delete",
+            "params": ids_to_delete, // params es un array directo, no un objeto
+            "id": 1
+        };
+
+        var response = req.get(url, JSON.stringify(jdata));
+
+        // Intentar parsear la respuesta
+        var parsedResponse = JSON.parse(response);
+
+        // Verificar si la API devolvió un error
+        if (parsedResponse.error) {
+            var errorMessage = parsedResponse.error.data || parsedResponse.error.message || "Error desconocido de la API de Zabbix.";
+            return { "error": "Error de la API Zabbix en delete_maintenance: " + errorMessage };
+        }
+
+        // Devolver el resultado exitoso (array de IDs eliminados)
+        return parsedResponse.result;
+
+    } catch (error) {
+        // En caso de error de JS/Red, también devolvemos un objeto
+        return { "error": "Error al eliminar el/los mantenimiento/s: " + error };
     }
 }
 
@@ -585,9 +632,25 @@ try {
                  result = {"error": "Mantenimiento no encontrado para mostrar: " + maintenanceName};
             }
             break;
-        // case 'delete': //AUN NO IMPLEMENTADO
-        //     // Lógica para delete
-        //     break;
+        case 'delete':
+            // Obtener ID del mantenimiento a eliminar a partir del nombre
+            var maintenanceDetails = get_maintenance_id(url, token, maintenanceName);
+            var maintenanceId = null;
+            
+            // Extraer el maintenanceid si se encontró el mantenimiento
+            if (Array.isArray(maintenanceDetails) && maintenanceDetails.length > 0) {
+                maintenanceId = extractIds(maintenanceDetails, "maintenanceid")[0];
+            }
+
+            // Validar que se encontró el mantenimiento
+            if (!maintenanceId) {
+                result = { "error": "Mantenimiento no encontrado para eliminar: " + maintenanceName };
+            } else {
+                // Llamar a delete_maintenance con el ID obtenido
+                // delete_maintenance espera un string o array de IDs
+                result = delete_maintenance(url, token, maintenanceId);
+            }
+            break;
         case 'list':
             result = list_maintenances(url, token, input.maintenance_prefix);
             break;

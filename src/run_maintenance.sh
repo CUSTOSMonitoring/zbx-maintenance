@@ -53,6 +53,7 @@ UPDATE_DESCRIPTION=""
 UPDATE_SECTOR="" # Necesario para el registro en Zabbix
 # DELETE
 DELETE_NAME=""
+DELETE_SECTOR=""
 # LIST
 LIST_FILTER=""
 
@@ -523,7 +524,24 @@ build_input_json_for_action() {
 
             jq -n "${jq_args[@]}" "$jq_filter"
             ;;
-        # Otros casos como delete, list...
+        delete)
+            # Argumentos base para delete
+            local jq_args=(
+                --arg url "$ZBX_URL"
+                --arg token "$ZBX_APITOKEN"
+                --arg act "delete"
+                --arg name "${DELETE_NAME}"
+            )
+
+            # Construimos el objeto JSON para delete
+            jq -n "${jq_args[@]}" '
+            {
+                zbx_url: $url,
+                zbx_apitoken: $token,
+                action: $act,
+                maintenance_name: $name
+            }'
+            ;;
         *)
             echo '{}' # JSON vacío por defecto si la acción no está implementada
             ;;
@@ -575,7 +593,7 @@ execute_display_and_report() {
 
 # Recibe el tipo de acción, el JSON de entrada para zabbix_js y el sector para reportar a Zabbix.
 execute_action_and_report() {
-    local action_type="$1" # "create" o "update"
+    local action_type="$1" # "create", "update" o "delete"
     local action_json="$2"
     local action_sector="$3" # Puede ser vacío si no se debe reportar a Zabbix
 
@@ -596,7 +614,7 @@ execute_action_and_report() {
         has_error=1
     fi
 
-    # Pre tipo de resultado para Zabbix
+    # Preparar mensajes y determinar status para Zabbix
     local user_message
     local zbx_mode
     local zbx_status
@@ -607,6 +625,9 @@ execute_action_and_report() {
                 ;;
             update)
                 user_message="Mantenimiento actualizado exitosamente:"
+                ;;
+            delete)
+                user_message="Mantenimiento eliminado exitosamente:"
                 ;;
             *)
                 user_message="Resultado de la operación ($action_type):"
@@ -621,6 +642,9 @@ execute_action_and_report() {
                 ;;
             update)
                 user_message="Error: Falló la actualización del mantenimiento."
+                ;;
+            delete)
+                user_message="Error: Falló la eliminación del mantenimiento."
                 ;;
             *)
                 user_message="Error: Falló la operación ($action_type)."
@@ -682,7 +706,7 @@ Opciones globales:
 Comandos:
     create      Crea un nuevo mantenimiento.
     update      Actualiza un mantenimiento existente.
-    delete      Elimina un mantenimiento existente. (NO IMPLEMENTADO AUN)
+    delete      Elimina un mantenimiento existente.
     list        Lista mantenimientos existentes gestionados por este proyecto (filtrados por prefijo).
 
 Use 'run_maintenance.sh <comando> --help' para ver opciones específicas de cada comando.
@@ -754,9 +778,17 @@ Elimina un mantenimiento existente en Zabbix.
 
 Opciones:
     -n, --name NAME                 Nombre del mantenimiento a eliminar (requerido).
+    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
+    --help, -h                      Muestra esta ayuda y sale.
 
 Ejemplo:
-    ./run_maintenance.sh delete --name "Mantenimiento de Prueba"
+    ./run_maintenance.sh delete \
+        --name "Mantenimiento de Prueba" \
+        --sector "Servicios"
+
+Nota:
+    - El mantenimiento debe existir y ser gestionado por este proyecto (prefijo configurado).
+    - La eliminación es permanente y no se puede deshacer.
 EOF
 }
 
@@ -1001,6 +1033,9 @@ cmd_delete() {
             -n|--name)
                 if [[ -z "$2" ]]; then echo "Error: --name requiere un valor." >&2; exit 1; fi
                 DELETE_NAME="$2"; shift 2 ;;
+            -S|--sector)
+                if [[ -z "$2" ]]; then echo "Error: --sector requiere un valor." >&2; exit 1; fi
+                DELETE_SECTOR="$2"; shift 2 ;;
             --help|-h)
                 show_help_delete; exit 0 ;;
             *)
@@ -1015,12 +1050,15 @@ cmd_delete() {
         exit 1
     fi
 
-    echo "Eliminar mantenimiento: $DELETE_NAME"
-    # Lógica de delete (requiere nueva función JS y adaptación del handler)
-    # local action_json = ...
-    # zabbix_js -s ... -p "$action_json"
-    echo "Funcionalidad de borrado no implementada aún." >&2
-    exit 1
+    # Construimos el JSON de entrada para el handler, incluyendo la acción
+    local action_json
+    action_json=$(build_input_json_for_action "delete")
+
+    # Pasamos "delete", el JSON, y el sector
+    if ! execute_action_and_report "delete" "$action_json" "$DELETE_SECTOR"; then
+        echo "La eliminación del mantenimiento falló críticamente." >&2
+        exit 1
+    fi
 }
 
 cmd_list() {
