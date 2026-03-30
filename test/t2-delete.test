@@ -1,0 +1,5 @@
+# Ejemplo de comando delete para el mantenimiento de test2
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    delete \
+    --name "[Web Mantenimientos] Mantenimiento de Prueba desde MaintenanceHandler: v2" \
+    --sector "test"

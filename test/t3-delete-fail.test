@@ -1,0 +1,7 @@
+#!/bin/bash
+# Ejemplo de comando delete que falla (mantenimiento no encontrado). Reporta el fallo al sector test
+# Asegurarse de que el nombre "[Web Mantenimientos] NombreQueNoExiste" NO exista en Zabbix
+./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
+    delete \
+    --name "[Web Mantenimientos] NombreQueNoExiste" \
+    --sector "test"

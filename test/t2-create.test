@@ -1,4 +1,4 @@
-# Ejemplo de comando create: test2
+# Ejemplo de comando create: test2 con description
 ./src/run_maintenance.sh --zbx-user "${ZBX_USER}" --zbx-password "${ZBX_PASS}" \
     create \
     --name "Mantenimiento de Prueba desde MaintenanceHandler: v2" \
