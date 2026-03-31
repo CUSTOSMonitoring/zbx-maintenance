@@ -625,6 +625,10 @@ try {
                  var displayInfo = display_maintenance(url, token, maintenanceId);
                  if (displayInfo && Array.isArray(displayInfo) && displayInfo.length > 0) {
                      result = format_display(displayInfo)[0]; // Formatear y devolver el primer elemento
+                     if (input.username && typeof input.username === 'string' && input.username.length > 0) {
+                         result.performed_by = input.username;
+                         result.performed_at = Math.floor(Date.now() / 1000); // Timestamp Unix de cuándo se consultó
+                     }
                  } else {
                      result = {"error": "No se pudo obtener la información detallada del mantenimiento."};
                  }

@@ -177,7 +177,6 @@ zbx_login() {
     fi
 
     # Construimos el body de la solicitud de login
-    # CORRECCIÓN: El parámetro es "username", no "user"
     local json_body
     json_body=$(jq -n --arg user "$username" --arg pass "$password" '
         {
@@ -185,7 +184,8 @@ zbx_login() {
             method: "user.login",
             params: {
                 username: $user,
-                password: $pass
+                password: $pass,
+                userData: true
             },
             id: 1
         }')
@@ -560,9 +560,15 @@ execute_display_and_report() {
     fi
 
     # Construimos el JSON de entrada para el handler, en modo 'display'
+    # Incluimos el username si está disponible
     local display_json
-    display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$disp_maintenance_name" \
-        '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name}')
+    if [[ -n "$SESSION_USERNAME" ]]; then
+        display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$disp_maintenance_name" --arg username "$SESSION_USERNAME" \
+            '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name, username: $username}')
+    else
+        display_json=$(jq -n --arg url "$ZBX_URL" --arg token "$ZBX_APITOKEN" --arg act "display" --arg name "$disp_maintenance_name" \
+            '{zbx_url: $url, zbx_apitoken: $token, action: $act, maintenance_name: $name}')
+    fi
 
     local disp_msg
     disp_msg=$(zabbix_js -s "$MAINTENANCE_HANDLER_JS" -p "$display_json")
@@ -1220,16 +1226,27 @@ if [[ -n "$RAW_ZBX_APITOKEN" ]]; then ZBX_APITOKEN="$RAW_ZBX_APITOKEN"; fi
 if [[ -n "$RAW_PREFIX_MAINTENANCE_NAME" ]]; then PREFIX_MAINTENANCE_NAME="$RAW_PREFIX_MAINTENANCE_NAME"; fi
 
 # --- Inicio de lógica de autenticación ---
+LOGGED_IN_INFO=""
 SESSION_TOKEN=""
+SESSION_USERNAME=""
 if [[ -n "$ZBX_USER" && -n "$ZBX_PASSWORD" ]]; then
     echo "Iniciando sesión en Zabbix como '$ZBX_USER'..." >&2
-    SESSION_TOKEN=$(zbx_login "$ZBX_URL" "$ZBX_USER" "$ZBX_PASSWORD")
-    if [[ $? -ne 0 || -z "$SESSION_TOKEN" ]]; then
+    LOGGED_IN_INFO=$(zbx_login "$ZBX_URL" "$ZBX_USER" "$ZBX_PASSWORD")
+    SESSION_TOKEN=$(jq -e -r '.sessionid' <<< "$LOGGED_IN_INFO" 2>/dev/null)
+    SESSION_USERNAME=$(jq -e -r '.username' <<< "$LOGGED_IN_INFO" 2>/dev/null)
+    ###Podriamos procesar en una sola linea: read -r SESSION_TOKEN USERNAME <<< "$(jq -r '[.sessionid, .username] | @tsv' <<< "$LOGGED_IN_INFO")"
+    if [ $? -ne 0 ] || [ -z "$SESSION_TOKEN" ] || [ "$SESSION_TOKEN" == "null" ]; then
         echo "Error fatal: No se pudo iniciar sesión." >&2
         exit 1
     fi
+    if [ $? -ne 0 ] || [ -z "$SESSION_USERNAME" ] || [ "$SESSION_USERNAME" == "null" ]; then
+        echo "Error: No se pudo obtener el username de la sesión." >&2
+        exit 1
+    fi
+
     # Usamos el token de sesión como si fuera un API token
     ZBX_APITOKEN="$SESSION_TOKEN"
+
     # Limpiar las credenciales sensibles de la memoria (opcional pero recomendado)
     unset ZBX_PASSWORD
 fi
