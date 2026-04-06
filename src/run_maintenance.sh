@@ -717,21 +717,26 @@ Herramienta para gestionar mantenimientos en Zabbix.
 
 Opciones globales:
     -u, --zbx-url URL               URL del API de Zabbix (ej: https://zabbix/api_jsonrpc.php)
-    -U, --zbx-user USER             Usuario de Zabbix para autenticación por sesión.
-    -P, --zbx-password PASS         Contraseña de Zabbix para autenticación por sesión.
-    -t, --zbx-apitoken TOKEN        Token de API de Zabbix (alternativa a usuario/contraseña).
+    -U, --zbx-user USER             Usuario de Zabbix para autenticación por sesión
+    -P, --zbx-password PASS         Contraseña de Zabbix para autenticación por sesión
+    -t, --zbx-apitoken TOKEN        Token de API de Zabbix (alternativa a usuario/contraseña)
     -c, --config PATH               Ruta al archivo de configuración (por defecto: config/default_params.conf)
     -h, --help                      Muestra esta ayuda general y sale
 
 Comandos:
-    create      Crea un nuevo mantenimiento.
-    update      Actualiza un mantenimiento existente.
-    delete      Elimina un mantenimiento existente.
-    list        Lista mantenimientos existentes gestionados por este proyecto (filtrados por prefijo).
+    create      Crea un nuevo mantenimiento
+    update      Actualiza un mantenimiento existente
+    delete      Elimina un mantenimiento existente
+    list        Lista mantenimientos gestionados por este proyecto (filtrados por prefijo)
 
 Use 'run_maintenance.sh <comando> --help' para ver opciones específicas de cada comando.
+
+Códigos de salida:
+    0   Éxito
+    1   Error (ver stderr para detalles)
 EOF
 }
+
 
 # Ayuda específica para cada subcomando
 show_help_create() {
@@ -741,24 +746,42 @@ Uso: run_maintenance.sh create [OPCIONES]
 Crea un nuevo mantenimiento en Zabbix.
 
 Opciones:
-    -n, --name NAME                 Nombre del nuevo mantenimiento (requerido).
-    --active-since TIMESTAMP        Timestamp Unix de inicio del mantenimiento. Por defecto, ahora.
-    --active-till TIMESTAMP         Timestamp Unix de fin del mantenimiento. Por defecto, ahora + 3 años.
-    --type TYPE                     Tipo de mantenimiento (0: Normal, 1: No Data). Por defecto 0.
-    --period PERIOD                 Duración del período de mantenimiento (ej: 2h, 1d). Requerido.
-    --startdate STARTDATE           Fecha/hora de inicio del primer período (timestamp o formato yyyy-mm-dd hh:mm:ss). Por defecto, ahora.
-    --description TEXT              Descripción del mantenimiento (opcional).
-    -H, --hostnames LIST            Lista de hosts separados por comas.
-    -G, --groupnames LIST           Lista de grupos separados por comas.
-    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
+    -n, --name NAME                 Nombre del nuevo mantenimiento (sin prefijo, requerido)
+    --active-since TIMESTAMP        Inicio del mantenimiento. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS'. Por defecto: ahora
+    --active-till TIMESTAMP         Fin del mantenimiento. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS'. Por defecto: ahora + 3 años
+    --type TYPE                     Tipo: 0=Normal (recopila datos), 1=No Data. Por defecto: 0
+    --period PERIOD                 Duración del período (ej: 30m, 2h, 1d, 1w). Requerido
+    --startdate STARTDATE           Inicio del primer período. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS'. Por defecto: ahora
+    --description TEXT              Descripción del mantenimiento (opcional)
+    -H, --hostnames LIST            Lista de hosts separados por comas (ej: "Host1,Host2")
+    -G, --groupnames LIST           Lista de grupos separados por comas (ej: "Grupo1,Grupo2")
+    -S, --sector NAME               Sector para registro en Zabbix (opcional, pero requerido para logging)
+    -h, --help                      Muestra esta ayuda y sale
 
-Ejemplo:
+Ejemplos:
+    # Mínimo (usa valores por defecto para active-since/till y startdate)
     ./run_maintenance.sh create \
         --name "Mantenimiento de Prueba" \
         --period 2h \
-        --description "Mantenimiento programado para el grupo de Servicios" \
-        --hostnames "Serv1, Serv2" \
+        --hostnames "Serv1,Serv2" \
         --sector "Servicios"
+
+    # Completo con todos los parámetros
+    ./run_maintenance.sh create \
+        --name "Mantenimiento Programado" \
+        --active-since "2026-01-01 00:00:00" \
+        --active-till "2026-12-31 23:59:59" \
+        --type 1 \
+        --period 4h \
+        --startdate "2026-01-01 02:00:00" \
+        --description "Mantenimiento nocturno para actualizaciones" \
+        --hostnames "Prod-Web-01,Prod-Web-02" \
+        --groupnames "Producción" \
+        --sector "Infraestructura"
+
+Nota:
+    - El nombre del mantenimiento llevará automáticamente el prefijo configurado ([Web Mantenimientos] por defecto)
+    - Si no se especifica --sector, la operación se ejecuta pero no se registra en Zabbix
 EOF
 }
 
@@ -769,24 +792,38 @@ Uso: run_maintenance.sh update [OPCIONES]
 Actualiza un mantenimiento existente en Zabbix.
 
 Opciones:
-    -n, --name NAME                 Nombre del mantenimiento a actualizar (requerido).
-    --period PERIOD                 Nueva duración del período de mantenimiento (ej: 2h, 1d).
-    --startdate STARTDATE           Nueva fecha/hora de inicio del período (timestamp o formato yyyy-mm-dd hh:mm:ss).
-    --active-since TIMESTAMP        Nuevo timestamp Unix de inicio del mantenimiento (opcional).
-    --active-till TIMESTAMP         Nuevo timestamp Unix de fin del mantenimiento (opcional).
-    --type TYPE                     Nuevo tipo de mantenimiento (0: Normal, 1: No Data) (opcional).
-    --description TEXT              Nueva descripción del mantenimiento (opcional).
-    -H, --hostnames LIST            Nueva lista de hosts separados por comas.
-    -G, --groupnames LIST           Nueva lista de grupos separados por comas.
-    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
+    -n, --name NAME                 Nombre del mantenimiento a actualizar (indicar el prefijo, requerido)
+    --period PERIOD                 Nueva duración del período (ej: 30m, 2h, 1d, 1w)
+    --startdate STARTDATE           Nuevo inicio del período. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS'
+    --active-since TIMESTAMP        Nuevo inicio del mantenimiento. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS' (opcional)
+    --active-till TIMESTAMP         Nuevo fin del mantenimiento. Formato: Unix timestamp o 'YYYY-MM-DD HH:MM:SS' (opcional)
+    --type TYPE                     Nuevo tipo: 0=Normal, 1=No Data (opcional)
+    --description TEXT              Nueva descripción del mantenimiento (opcional)
+    -H, --hostnames LIST            Nueva lista de hosts separados por comas (reemplaza los existentes)
+    -G, --groupnames LIST           Nueva lista de grupos separados por comas (reemplaza los existentes)
+    -S, --sector NAME               Sector para registro en Zabbix (opcional, pero requerido para logging)
+    -h, --help                      Muestra esta ayuda y sale
 
-Ejemplo:
+Ejemplos:
+    # Actualizar solo el período y hosts
     ./run_maintenance.sh update \
-        --name "Mantenimiento de Prueba" \
+        --name "[Web Mantenimientos] Mantenimiento de Prueba" \
         --period 4h \
-        --description "Descripción actualizada del mantenimiento" \
-        --hostnames "Serv1, Serv3" \
+        --hostnames "Serv1,Serv3" \
         --sector "Servicios"
+
+    # Actualizar múltiples campos
+    ./run_maintenance.sh update \
+        --name "[Web Mantenimientos] Mantenimiento de Prueba" \
+        --active-since "2026-02-01 00:00:00" \
+        --active-till "2026-02-28 23:59:59" \
+        --description "Descripción actualizada" \
+        --sector "Servicios"
+
+Nota:
+    - Los parámetros no especificados NO se modifican (se mantienen los valores actuales)
+    - Para quitar todos los hosts o grupos, use --hostnames "" o --groupnames ""
+    - El nombre debe coincidir exactamente con el mantenimiento existente (incluir el prefijo manualmente)
 EOF
 }
 
@@ -797,18 +834,20 @@ Uso: run_maintenance.sh delete [OPCIONES]
 Elimina un mantenimiento existente en Zabbix.
 
 Opciones:
-    -n, --name NAME                 Nombre del mantenimiento a eliminar (requerido).
-    -S, --sector NAME               Sector responsable (requerido para registro en Zabbix).
-    --help, -h                      Muestra esta ayuda y sale.
+    -n, --name NAME                 Nombre del mantenimiento a eliminar (indicar el prefijo, requerido)
+    -S, --sector NAME               Sector para registro en Zabbix (opcional, pero requerido para logging)
+    -h, --help                      Muestra esta ayuda y sale
 
 Ejemplo:
     ./run_maintenance.sh delete \
         --name "Mantenimiento de Prueba" \
         --sector "Servicios"
 
-Nota:
-    - El mantenimiento debe existir y ser gestionado por este proyecto (prefijo configurado).
-    - La eliminación es permanente y no se puede deshacer.
+Advertencias:
+    - La eliminación es PERMANENTE y no se puede deshacer
+    - El mantenimiento debe existir y puede o no ser gestionado por este proyecto (prefijo NO agregado automáticamente)
+    - El nombre se debe proporcionar CON el prefijo; el script NO lo agregará automáticamente
+    - Verifique cuidadosamente antes de ejecutar esta operación
 EOF
 }
 
@@ -816,13 +855,23 @@ show_help_list() {
     cat << 'EOF'
 Uso: run_maintenance.sh list
 
-Lista mantenimientos existentes gestionados por este proyecto (filtrados por prefijo).
+Lista mantenimientos gestionados por este proyecto (filtrados por prefijo).
 
 Esta acción no requiere parámetros adicionales. El prefijo utilizado para filtrar
-los mantenimientos se define en la configuración global del script o en el archivo de configuración.
+los mantenimientos se define en la configuración global del script o en el archivo
+de configuración (config/default_params.conf).
 
 Ejemplo:
     ./run_maintenance.sh list
+
+Salida:
+    - Formato JSON con todos los detalles de cada mantenimiento (id, nombre, tipo,
+      descripción, períodos, hosts, grupos, etc.)
+    - Solo se listan mantenimientos cuyo nombre comienza con el prefijo configurado
+
+Nota:
+    - Para ver detalles de un mantenimiento específico, use la API de Zabbix directamente
+      o consulte el histórico de registros en Zabbix si se configuró logging
 EOF
 }
 
