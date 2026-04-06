@@ -665,11 +665,11 @@ execute_action_and_report() {
         # Usamos jq para agregar los campos al JSON, manejando tanto objetos como strings
         if echo "$rsp_msg" | jq empty 2>/dev/null; then
             # rsp_msg es JSON válido, lo enriquecemos
-            enriched_msg=$(echo "$rsp_msg" | jq --arg by "$SESSION_USERNAME" --argjson at "$(date "+%F %T")" \
+            enriched_msg=$(echo "$rsp_msg" | jq --arg by "$SESSION_USERNAME" --arg at "$(date '+%F %T')" \
                 '. + {performed_by: $by, performed_at: $at}')
         else
             # rsp_msg no es JSON (ej: mensaje de error plano), lo convertimos a objeto y enriquecemos
-            enriched_msg=$(jq -n --arg msg "$rsp_msg" --arg by "$SESSION_USERNAME" --argjson at "$(date "+%F %T")" \
+            enriched_msg=$(jq -n --arg msg "$rsp_msg" --arg by "$SESSION_USERNAME" --arg at "$(date '+%F %T')" \
                 '{message: $msg, performed_by: $by, performed_at: $at}')
         fi
     fi
