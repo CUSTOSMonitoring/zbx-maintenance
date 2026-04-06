@@ -660,9 +660,23 @@ execute_action_and_report() {
         zbx_status="error"
     fi
 
+    local enriched_msg="$rsp_msg"
+    if [[ -n "$SESSION_USERNAME" ]]; then
+        # Usamos jq para agregar los campos al JSON, manejando tanto objetos como strings
+        if echo "$rsp_msg" | jq empty 2>/dev/null; then
+            # rsp_msg es JSON válido, lo enriquecemos
+            enriched_msg=$(echo "$rsp_msg" | jq --arg by "$SESSION_USERNAME" --argjson at "$(date "+%F %T")" \
+                '. + {performed_by: $by, performed_at: $at}')
+        else
+            # rsp_msg no es JSON (ej: mensaje de error plano), lo convertimos a objeto y enriquecemos
+            enriched_msg=$(jq -n --arg msg "$rsp_msg" --arg by "$SESSION_USERNAME" --argjson at "$(date "+%F %T")" \
+                '{message: $msg, performed_by: $by, performed_at: $at}')
+        fi
+    fi
+
     # Imprimir resultado en stdout
-    echo "$user_message"
-    echo "$rsp_msg"
+    ###echo "$user_message" ##DEBUG
+    ###echo "$enriched_msg"
 
     # Reportar a Zabbix si se proporcionó un sector
     if [[ -n "$action_sector" ]]; then
@@ -672,7 +686,7 @@ execute_action_and_report() {
         item_id=$(get_itemid "$ZBX_URL" "$ZBX_APITOKEN" "$HOST_LOG" "$KEY_SECTOR")
 
         if [[ -n "$item_id" ]]; then
-            send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "$zbx_mode" "$zbx_status" "$rsp_msg" "$HOST_LOG" "$KEY_SECTOR"
+            send_result "$ZBX_URL" "$ZBX_APITOKEN" "$item_id" "$zbx_mode" "$zbx_status" "$enriched_msg" "$HOST_LOG" "$KEY_SECTOR"
         else
             echo "Advertencia: No se pudo obtener el itemid para registrar el resultado de $action_type en el sector '$action_sector'." >&2
             # Opcional: Retornar 1 aquí si decidimos que puede llegar a ser un error critico
@@ -918,16 +932,17 @@ cmd_create() {
         exit 1
     fi
 
-    # Display opcional o requerido después de create (si se especificó un sector)
-    # Por ahora, lo hacemos siempre si se especificó un sector.
-    if [[ -n "$CREATE_SECTOR" ]]; then # Asumiendo que defines CREATE_SECTOR en cmd_create o uses una variable global si aplica
-        execute_display_and_report "$CREATE_NAME" "$CREATE_SECTOR"
-        # Opcional: Manejar retorno
-        # local disp_ret=$?
-        # if [ $disp_ret -ne 0 ]; then
-        #     echo "Advertencia: El proceso de display finalizó con errores." >&2
-        # fi
-    fi
+    ## Funcionalidad de display post accion (maintenance.get)
+    ## Display opcional o requerido después de create (si se especificó un sector)
+    ## Por ahora, lo hacemos siempre si se especificó un sector.
+    #if [[ -n "$CREATE_SECTOR" ]]; then # Asumiendo que defines CREATE_SECTOR en cmd_create o uses una variable global si aplica
+    #    execute_display_and_report "$CREATE_NAME" "$CREATE_SECTOR"
+    #    # Opcional: Manejar retorno
+    #    # local disp_ret=$?
+    #    # if [ $disp_ret -ne 0 ]; then
+    #    #     echo "Advertencia: El proceso de display finalizó con errores." >&2
+    #    # fi
+    #fi
 
 }
 
@@ -1026,10 +1041,11 @@ cmd_update() {
         exit 1
     fi
 
-    # Display opcional o requerido después de update
-    if [[ -n "$UPDATE_SECTOR" ]]; then
-        execute_display_and_report "$UPDATE_NAME" "$UPDATE_SECTOR"
-    fi
+    # Funcionalidad de display post accion (maintenance.get)
+    ## Display opcional o requerido después de update
+    #if [[ -n "$UPDATE_SECTOR" ]]; then
+    #    execute_display_and_report "$UPDATE_NAME" "$UPDATE_SECTOR"
+    #fi
 }
 
 cmd_delete() {
