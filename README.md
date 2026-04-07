@@ -1,7 +1,7 @@
 # 🛠️ Zabbix Maintenance Handler
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Zabbix Version](https://img.shields.io/badge/zabbix-7.0-green.svg)](https://www.zabbix.com/documentation/7.0)
+[![Zabbix Version](https://img.shields.io/badge/zabbix->=7.0-green.svg)](https://www.zabbix.com/documentation/7.0)
 [![Shell Script](https://img.shields.io/badge/shell-Bash-blue.svg)](https://www.gnu.org/software/bash/)
 [![JavaScript](https://img.shields.io/badge/js-Duktape-yellow.svg)](https://duktape.org/)
 
