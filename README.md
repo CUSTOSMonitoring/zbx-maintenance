@@ -108,7 +108,7 @@ chmod +x src/run_maintenance.sh
 ### 4. (Opcional) Agregar al PATH
 ```bash
 # En ~/.bashrc o ~/.zshrc
-export PATH="$PATH:/ruta/a/zbx-maintenance-dev/src"
+export PATH="$PATH:/ruta/a/zbx-maintenance/src"
 ```
 
 ---
@@ -398,7 +398,7 @@ Si se especifica `--sector NAME`, el resultado de cada operación se envía a un
 ## 📁 Estructura del Proyecto
 
 ```
-zbx-maintenance-dev/
+zbx-maintenance/
 ├── README.md                 # Este archivo
 ├── LICENSE                   # Licencia MIT
 ├── config/
@@ -455,8 +455,8 @@ Eres libre de usar, modificar y distribuir este software, sujeto a los términos
 
 ### ¿Necesitas ayuda?
 - 📖 Consulta la [documentación oficial de Zabbix API](https://www.zabbix.com/documentation/7.0/en/manual/api)
-- 🐛 Reporta bugs en [Issues](https://github.com/tu-usuario/zbx-maintenance-dev/issues)
-- 💬 Discute ideas en [Discussions](https://github.com/tu-usuario/zbx-maintenance-dev/discussions)
+- 🐛 Reporta bugs en [Issues](https://github.com/CUSTOSMonitoring/zbx-maintenance/issues)
+- 💬 Discute ideas en [Discussions](https://github.com/CUSTOSMonitoring/zbx-maintenance/discussions)
 
 ---
 
